@@ -1,6 +1,6 @@
 # Sistema de Gestão de Freelancers e Projetos
 
-**Dupla:** [Will Marinho] e [Douglas José]
+**Dupla:** [@Devwillmarinho] e [Douglas José]
 
 **Projeto:** Sistema de Gestão de Freelancers e Projetos
 
