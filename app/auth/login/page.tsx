@@ -21,6 +21,7 @@ import {
   Loader2,
   Shield,
   Zap,
+  ArrowLeft,
   Users,
 } from "lucide-react"
 
@@ -125,6 +126,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex">
       {/* Left Side - Login Form */}
       <div className="flex-1 flex items-center justify-center p-8">
+        <div className="absolute top-8 left-8">
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-6 w-6" />
+          </Button>
+        </div>
         <div className="w-full max-w-md">
           <Card className="border-0 shadow-2xl">
             <CardHeader className="text-center pb-8">
