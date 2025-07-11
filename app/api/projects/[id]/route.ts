@@ -69,15 +69,17 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       return NextResponse.json({ error: "Access denied" }, { status: 403 })
     }
 
-    const { title, description, budget, deadline, required_skills, status } = body
+    const { title, description, budget, deadline, required_skills, status } = body;
 
-    const updateData: any = {}
-    if (title) updateData.title = title
-    if (description) updateData.description = description
-    if (budget) updateData.budget = budget
-    if (deadline) updateData.deadline = deadline
-    if (required_skills) updateData.required_skills = required_skills
-    if (status) updateData.status = status
+    // Constrói o objeto de atualização apenas com os campos fornecidos e válidos.
+    // Isso evita a atualização de campos com valores nulos ou vazios indesejados.
+    const updateData: { [key: string]: any } = {};
+    if (title !== undefined) updateData.title = title;
+    if (description !== undefined) updateData.description = description;
+    if (budget !== undefined) updateData.budget = budget;
+    if (deadline !== undefined) updateData.deadline = deadline;
+    if (required_skills !== undefined) updateData.required_skills = required_skills;
+    if (status !== undefined) updateData.status = status;
 
     const { data: project, error } = await supabaseAdmin
       .from("projects")

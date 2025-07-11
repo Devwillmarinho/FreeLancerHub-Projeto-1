@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -11,63 +11,28 @@ import { Search, Filter, DollarSign, Calendar, MapPin, Users, Briefcase } from "
 export default function ProjectsPage() {
   const [searchTerm, setSearchTerm] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [projects, setProjects] = useState<any[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  const projects = [
-    {
-      id: 1,
-      title: "Desenvolvimento de E-commerce Completo",
-      description:
-        "Preciso de um e-commerce completo com carrinho de compras, sistema de pagamento integrado e área administrativa. O projeto deve ser responsivo e otimizado para SEO.",
-      budget: 15000,
-      deadline: "2024-03-15",
-      status: "open",
-      skills: ["JavaScript", "React", "Node.js", "PostgreSQL"],
-      company: "Tech Solutions LTDA",
-      location: "Remoto",
-      proposals: 12,
-    },
-    {
-      id: 2,
-      title: "Redesign de Interface Mobile",
-      description:
-        "Redesign completo do aplicativo mobile com foco em UX/UI moderno. Preciso de wireframes, protótipos e implementação final.",
-      budget: 8000,
-      deadline: "2024-02-28",
-      status: "in_progress",
-      skills: ["UI/UX Design", "Figma", "Mobile Design", "Prototyping"],
-      company: "Digital Innovations",
-      location: "São Paulo, SP",
-      proposals: 8,
-      freelancer: "Ana Designer",
-    },
-    {
-      id: 3,
-      title: "Sistema de Gestão Interna",
-      description:
-        "Sistema web para gestão de funcionários, processos internos e relatórios. Deve incluir dashboard administrativo e diferentes níveis de acesso.",
-      budget: 25000,
-      deadline: "2024-04-20",
-      status: "open",
-      skills: ["JavaScript", "React", "Node.js", "PostgreSQL", "Docker"],
-      company: "Empresa ABC",
-      location: "Remoto",
-      proposals: 5,
-    },
-    {
-      id: 4,
-      title: "Aplicativo de Delivery",
-      description:
-        "Desenvolvimento de aplicativo mobile para delivery de comida com integração de pagamento e GPS para rastreamento.",
-      budget: 30000,
-      deadline: "2024-05-10",
-      status: "completed",
-      skills: ["React Native", "Node.js", "MongoDB", "GPS Integration"],
-      company: "FoodTech",
-      location: "Rio de Janeiro, RJ",
-      proposals: 15,
-      freelancer: "Pedro Mobile",
-    },
-  ]
+  useEffect(() => {
+    async function fetchOpenProjects() {
+      setIsLoading(true)
+      try {
+        // Esta é uma rota pública, então não precisa de token
+        const response = await fetch("/api/projects?status=open")
+        if (!response.ok) {
+          throw new Error("Falha ao buscar projetos abertos")
+        }
+        const data = await response.json()
+        setProjects(data.data)
+      } catch (error) {
+        console.error(error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    fetchOpenProjects()
+  }, [])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -99,9 +64,14 @@ export default function ProjectsPage() {
     const matchesSearch =
       project.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       project.description.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === "all" || project.status === statusFilter
+    const matchesStatus = statusFilter === "all" || project.status === statusFilter || project.status === "open"
     return matchesSearch && matchesStatus
   })
+
+  const averageBudget =
+    filteredProjects.length > 0
+      ? filteredProjects.reduce((acc, p) => acc + p.budget, 0) / filteredProjects.length
+      : 0
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -174,7 +144,9 @@ export default function ProjectsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Valor Médio</p>
-                  <p className="text-2xl font-bold text-gray-900">R$ 19.5K</p>
+                  <p className="text-2xl font-bold text-gray-900">
+                    R$ {(averageBudget / 1000).toFixed(1)}K
+                  </p>
                 </div>
                 <DollarSign className="h-8 w-8 text-green-600" />
               </div>
@@ -185,7 +157,7 @@ export default function ProjectsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Propostas Totais</p>
-                  <p className="text-2xl font-bold text-gray-900">40</p>
+                  <p className="text-2xl font-bold text-gray-900">{projects.reduce((acc, p) => acc + p.proposals.length, 0)}</p>
                 </div>
                 <Users className="h-8 w-8 text-purple-600" />
               </div>
@@ -195,6 +167,7 @@ export default function ProjectsPage() {
 
         {/* Projects Grid */}
         <div className="grid gap-6">
+          {isLoading && <p>Carregando projetos...</p>}
           {filteredProjects.map((project) => (
             <Card key={project.id} className="hover:shadow-lg transition-shadow">
               <CardHeader>
@@ -220,11 +193,11 @@ export default function ProjectsPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <MapPin className="h-4 w-4" />
-                      <span>{project.location}</span>
+                      <span>{project.company.location || "Remoto"}</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <Users className="h-4 w-4" />
-                      <span>{project.proposals} propostas</span>
+                      <span>{project.proposals.length} propostas</span>
                     </div>
                   </div>
 
@@ -232,7 +205,7 @@ export default function ProjectsPage() {
                   <div>
                     <p className="text-sm font-medium text-gray-700 mb-2">Habilidades necessárias:</p>
                     <div className="flex flex-wrap gap-2">
-                      {project.skills.map((skill) => (
+                      {project.required_skills.map((skill: string) => (
                         <Badge key={skill} variant="secondary" className="text-xs">
                           {skill}
                         </Badge>
@@ -243,7 +216,7 @@ export default function ProjectsPage() {
                   {/* Company Info */}
                   <div className="flex items-center justify-between pt-4 border-t">
                     <div>
-                      <p className="text-sm font-medium text-gray-900">{project.company}</p>
+                      <p className="text-sm font-medium text-gray-900">{project.company.company_name}</p>
                       {project.freelancer && <p className="text-sm text-gray-600">Freelancer: {project.freelancer}</p>}
                     </div>
                     <div className="flex gap-2">
