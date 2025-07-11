@@ -162,15 +162,17 @@ export default function HomePage() {
       {/* Header */}
       <header className="fixed top-0 w-full bg-white/95 backdrop-blur-sm border-b z-50 transition-all duration-300">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-3">
-            <div className="relative">
-              <Briefcase className="h-8 w-8 text-blue-600" />
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+          <Link href="/" className="cursor-pointer">
+            <div className="flex items-center space-x-3">
+              <div className="relative">
+                <Briefcase className="h-8 w-8 text-blue-600" />
+                <div className="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+              </div>
+              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                FreelanceHub
+              </h1>
             </div>
-            <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              FreelanceHub
-            </h1>
-          </div>
+          </Link>
           <nav className="hidden md:flex items-center space-x-8">
             <Link
               href="#features"
@@ -236,7 +238,7 @@ export default function HomePage() {
               </div>
 
               <div className="flex flex-col sm:flex-row gap-4">
-                <Link href="/auth/register?type=company">
+                <Link href="/talents">
                   <Button
                     size="lg"
                     className="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-lg px-8 py-4"
@@ -245,7 +247,7 @@ export default function HomePage() {
                     Contratar Talentos
                   </Button>
                 </Link>
-                <Link href="/auth/register?type=freelancer">
+                <Link href="/projects">
                   <Button
                     size="lg"
                     variant="outline"
