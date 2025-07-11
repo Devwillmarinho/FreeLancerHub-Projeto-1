@@ -216,8 +216,8 @@ export default function HomePage() {
       <section className="pt-24 pb-20 bg-gradient-to-br from-blue-50 via-white to-purple-50 relative overflow-hidden">
         <div className="absolute inset-0 bg-grid-pattern opacity-5"></div>
         <div className="container mx-auto px-4">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <div className="space-y-8 animate-fade-in-up">
+          <div className="grid lg:grid-cols-12 gap-8 items-center">
+            <div className="space-y-8 animate-fade-in-up lg:col-span-5">
               <div className="space-y-4">
                 <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors">
                   🚀 Mais de 15.000 freelancers ativos
@@ -286,12 +286,12 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="relative animate-fade-in-right">
+            <div className="relative animate-fade-in-right lg:col-span-7 transform lg:scale-115 lg:translate-x-16">
               <div className="relative z-10">
                 <img
-                  src="/placeholder.svg?height=600&width=800"
-                  alt="Freelancers trabalhando"
-                  className="rounded-2xl shadow-2xl"
+                  src="/blusa roxa.png"
+                  alt="Freelancer profissional sorrindo, representando os talentos disponíveis na plataforma FreelanceHub"
+                  className="w-full h-auto rounded-2xl shadow-2xl"
                 />
                 <div className="absolute -top-4 -left-4 w-24 h-24 bg-blue-600 rounded-full flex items-center justify-center animate-bounce">
                   <Rocket className="w-12 h-12 text-white" />
@@ -302,7 +302,7 @@ export default function HomePage() {
               </div>
 
               {/* Floating Cards */}
-              <div className="absolute top-10 -right-10 bg-white p-4 rounded-lg shadow-lg animate-float">
+              <div className="absolute top-10 right-4 z-20 bg-white p-4 rounded-lg shadow-lg animate-float">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                     <CheckCircle className="w-6 h-6 text-green-600" />
@@ -316,7 +316,7 @@ export default function HomePage() {
                 </div>
               </div>
 
-              <div className="absolute bottom-10 -left-10 bg-white p-4 rounded-lg shadow-lg animate-float-delayed">
+              <div className="absolute bottom-4 -left-4 z-20 bg-white p-4 rounded-lg shadow-lg animate-float-delayed">
                 <div className="flex items-center space-x-3">
                   <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                     <MessageSquare className="w-6 h-6 text-blue-600" />
