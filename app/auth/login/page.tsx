@@ -43,19 +43,29 @@ export default function LoginPage() {
     setSuccess("")
 
     try {
-      // Simulação de login para preview
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(formData),
+      })
 
-      if (formData.email && formData.password) {
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Falha no login")
+      }
+
+      if (data.token) {
+        localStorage.setItem("token", data.token) // Salva o token no navegador
         setSuccess("Login realizado com sucesso! Redirecionando...")
         setTimeout(() => {
           router.push("/dashboard")
         }, 1500)
-      } else {
-        setError("Email e senha são obrigatórios")
       }
-    } catch (error) {
-      setError("Erro de conexão. Tente novamente.")
+    } catch (err: any) {
+      setError(err.message || "Erro de conexão. Tente novamente.")
     } finally {
       setLoading(false)
     }
@@ -64,15 +74,30 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setLoading(true)
     setError("")
+    setSuccess("")
+
+    // Em um projeto real, você usaria a biblioteca do Google para obter o token.
+    // Por enquanto, vamos simular a obtenção de um token para testar a API.
+    const fakeGoogleToken = "fake-google-token-for-dev"
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      setSuccess("Login com Google realizado com sucesso!")
-      setTimeout(() => {
-        router.push("/dashboard")
-      }, 1500)
-    } catch (error) {
-      setError("Erro no login com Google")
+      const response = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // O tipo de usuário pode ser selecionado em um modal antes do login com Google
+        body: JSON.stringify({ googleToken: fakeGoogleToken, user_type: "freelancer" }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "Falha no login com Google")
+      }
+
+      localStorage.setItem("token", data.data.token) // Salva o token
+      setSuccess("Login com Google bem-sucedido! Redirecionando...")
+      router.push("/dashboard")
+    } catch (err: any) {
+      setError(err.message || "Erro no login com Google")
     } finally {
       setLoading(false)
     }

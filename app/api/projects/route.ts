@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
         company:users!projects_company_id_fkey(id, name, company_name),
         freelancer:users!projects_freelancer_id_fkey(id, name),
         proposals(id, freelancer_id, status)
-      `)
+      `, { count: 'exact' }) // Adiciona a contagem total
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       query = query.overlaps("required_skills", skills)
     }
 
-    const { data: projects, error } = await query
+    const { data: projects, error, count } = await query
 
     if (error) {
       return NextResponse.json({ error: "Failed to fetch projects" }, { status: 500 })
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
       pagination: {
         page,
         limit,
-        total: projects.length,
+        total: count,
       },
     })
   } catch (error) {

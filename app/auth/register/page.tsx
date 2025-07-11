@@ -158,18 +158,32 @@ export default function RegisterPage() {
     setSuccess("")
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const response = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ ...formData, user_type: userType }),
+      })
 
-      if (formData.email && formData.password && formData.name) {
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || "Falha ao criar a conta.")
+      }
+
+      if (data.token) {
+        // Idealmente, salvar o token para login automático
+        // localStorage.setItem('token', data.token);
         setSuccess("Conta criada com sucesso! Redirecionando...")
         setTimeout(() => {
           router.push("/dashboard")
         }, 1500)
-      } else {
-        setError("Preencha todos os campos obrigatórios")
       }
-    } catch (error) {
-      setError("Erro de conexão. Tente novamente.")
+    } catch (err: any) {
+      setError(
+        err.message || "Ocorreu um erro. Verifique os dados e tente novamente."
+      )
     } finally {
       setLoading(false)
     }
@@ -195,15 +209,28 @@ export default function RegisterPage() {
   const handleGoogleRegister = async () => {
     setLoading(true)
     setError("")
+    setSuccess("")
+
+    // Simulação para desenvolvimento
+    const fakeGoogleToken = "fake-google-token-for-dev-register"
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-      setSuccess("Registro com Google realizado com sucesso!")
-      setTimeout(() => {
-        router.push("/dashboard")
-      }, 1500)
-    } catch (error) {
-      setError("Erro no registro com Google")
+      const response = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ googleToken: fakeGoogleToken, user_type: userType }),
+      })
+
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "Falha no registro com Google")
+      }
+
+      localStorage.setItem("token", data.data.token) // Salva o token para login automático
+      setSuccess("Registro com Google bem-sucedido! Redirecionando...")
+      router.push("/dashboard")
+    } catch (err: any) {
+      setError(err.message || "Erro no registro com Google")
     } finally {
       setLoading(false)
     }

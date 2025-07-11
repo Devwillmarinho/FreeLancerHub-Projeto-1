@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -52,6 +52,10 @@ export default function DashboardPage() {
     skills: "",
     category: "",
   })
+  const [projects, setProjects] = useState<any[]>([])
+  const [isLoadingProjects, setIsLoadingProjects] = useState(true)
+  const [proposals, setProposals] = useState<any[]>([])
+  const [isLoadingProposals, setIsLoadingProposals] = useState(true)
 
   const stats = [
     {
@@ -88,38 +92,50 @@ export default function DashboardPage() {
     },
   ]
 
-  const projects = [
-    {
-      id: 1,
-      title: "Desenvolvimento de E-commerce",
-      status: "in_progress",
-      budget: 15000,
-      freelancer: "Carlos Developer",
-      deadline: "2024-02-15",
-      progress: 65,
-      messages: 12,
-    },
-    {
-      id: 2,
-      title: "Redesign de Interface Mobile",
-      status: "completed",
-      budget: 8000,
-      freelancer: "Ana Designer",
-      deadline: "2024-01-30",
-      progress: 100,
-      messages: 8,
-    },
-    {
-      id: 3,
-      title: "Sistema de Gestão Interna",
-      status: "open",
-      budget: 25000,
-      freelancer: null,
-      deadline: "2024-03-20",
-      progress: 0,
-      messages: 0,
-    },
-  ]
+  useEffect(() => {
+    async function fetchProjects() {
+      try {
+        const token = localStorage.getItem("token") // Pega o token salvo
+        const response = await fetch("/api/projects", {
+          headers: {
+            // Envia o token para a API para autenticação
+            "Authorization": `Bearer ${token}`,
+          },
+        })
+        if (!response.ok) {
+          throw new Error("Falha ao buscar projetos")
+        }
+        const data = await response.json()
+        setProjects(data.data)
+      } catch (error) {
+        console.error(error)
+      } finally {
+        setIsLoadingProjects(false)
+      }
+    }
+    fetchProjects()
+  }, [])
+
+  useEffect(() => {
+    async function fetchProposals() {
+      try {
+        const token = localStorage.getItem("token")
+        const response = await fetch("/api/proposals", {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) {
+          throw new Error("Falha ao buscar propostas")
+        }
+        const data = await response.json()
+        setProposals(data.data)
+      } catch (error) {
+        console.error(error)
+      } finally {
+        setIsLoadingProposals(false)
+      }
+    }
+    fetchProposals()
+  }, [])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -147,17 +163,36 @@ export default function DashboardPage() {
     }
   }
 
-  const handleCreateProject = () => {
-    console.log("Criando projeto:", newProject)
-    setShowNewProjectDialog(false)
-    setNewProject({
-      title: "",
-      description: "",
-      budget: "",
-      deadline: "",
-      skills: "",
-      category: "",
-    })
+  const handleCreateProject = async () => {
+    const token = localStorage.getItem("token")
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: newProject.title,
+          description: newProject.description,
+          budget: Number(newProject.budget),
+          deadline: newProject.deadline,
+          required_skills: newProject.skills.split(",").map((s) => s.trim()),
+        }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        throw new Error(errorData.error || "Falha ao criar projeto.")
+      }
+
+      const createdProject = await response.json()
+      setProjects([createdProject.data, ...projects]) // Adiciona o novo projeto à lista
+      setShowNewProjectDialog(false) // Fecha o modal
+    } catch (error) {
+      console.error("Erro ao criar projeto:", error)
+      // TODO: Mostrar erro para o usuário
+    }
   }
 
   return (
@@ -474,33 +509,13 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    {
-                      id: 1,
-                      project: "Desenvolvimento de E-commerce",
-                      freelancer: "João Silva",
-                      budget: 14000,
-                      duration: 45,
-                      status: "pending",
-                      rating: 4.8,
-                      avatar: "/placeholder.svg?height=40&width=40",
-                    },
-                    {
-                      id: 2,
-                      project: "Sistema de Gestão Interna",
-                      freelancer: "Maria Santos",
-                      budget: 23000,
-                      duration: 60,
-                      status: "accepted",
-                      rating: 4.9,
-                      avatar: "/placeholder.svg?height=40&width=40",
-                    },
-                  ].map((proposal) => (
+                  {isLoadingProposals && <p>Carregando propostas...</p>}
+                  {!isLoadingProposals && proposals.map((proposal) => (
                     <div key={proposal.id} className="border rounded-lg p-6">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-4">
                           <Avatar>
-                            <AvatarImage src={proposal.avatar || "/placeholder.svg"} />
+                            <AvatarImage src={proposal.freelancer.avatar_url || "/placeholder.svg"} />
                             <AvatarFallback>
                               {proposal.freelancer
                                 .split(" ")
@@ -509,14 +524,14 @@ export default function DashboardPage() {
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <h3 className="font-semibold text-gray-900">{proposal.project}</h3>
+                            <h3 className="font-semibold text-gray-900">{proposal.project.title}</h3>
                             <p className="text-sm text-gray-600">
-                              Freelancer: {proposal.freelancer} • Orçamento: R$ {proposal.budget.toLocaleString()} •
-                              Prazo: {proposal.duration} dias
+                              Freelancer: {proposal.freelancer.name} • Orçamento: R$ {proposal.proposed_budget.toLocaleString()} •
+                              Prazo: {proposal.estimated_duration} dias
                             </p>
                             <div className="flex items-center mt-1">
                               <Star className="h-4 w-4 text-yellow-400 fill-current" />
-                              <span className="text-sm text-gray-600 ml-1">{proposal.rating}</span>
+                              <span className="text-sm text-gray-600 ml-1">{proposal.freelancer.rating || "N/A"}</span>
                             </div>
                           </div>
                         </div>
@@ -630,49 +645,29 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {[
-                    {
-                      id: 1,
-                      title: "Contrato #001 - E-commerce",
-                      freelancer: "Carlos Developer",
-                      value: 15000,
-                      startDate: "01/01/2024",
-                      status: "active",
-                      rating: 4.8,
-                      progress: 65,
-                    },
-                    {
-                      id: 2,
-                      title: "Contrato #002 - Design Mobile",
-                      freelancer: "Ana Designer",
-                      value: 8000,
-                      startDate: "15/12/2023",
-                      status: "completed",
-                      rating: 5.0,
-                      progress: 100,
-                    },
-                  ].map((contract) => (
+                  {isLoadingContracts && <p>Carregando contratos...</p>}
+                  {!isLoadingContracts && contracts.map((contract) => (
                     <div key={contract.id} className="border rounded-lg p-6">
                       <div className="flex items-center justify-between mb-4">
                         <div>
-                          <h3 className="font-semibold text-gray-900">{contract.title}</h3>
+                          <h3 className="font-semibold text-gray-900">{contract.project.title}</h3>
                           <p className="text-sm text-gray-600">
-                            Freelancer: {contract.freelancer} • Valor: R$ {contract.value.toLocaleString()} • Início:{" "}
-                            {contract.startDate}
+                            Freelancer: {contract.freelancer.name} • Valor: R$ {contract.budget.toLocaleString()} • Início:{" "}
+                            {new Date(contract.start_date).toLocaleDateString()}
                           </p>
                           <div className="flex items-center gap-2 mt-2">
                             <div className="flex items-center gap-1">
                               <Star className="h-4 w-4 text-yellow-500 fill-current" />
-                              <span className="text-sm text-gray-600">{contract.rating}</span>
+                              <span className="text-sm text-gray-600">{contract.freelancer.rating || "N/A"}</span>
                             </div>
                             <Badge
                               className={
-                                contract.status === "active"
+                                !contract.is_completed
                                   ? "bg-blue-100 text-blue-800"
                                   : "bg-green-100 text-green-800"
                               }
                             >
-                              {contract.status === "active" ? "Em Andamento" : "Concluído"}
+                              {!contract.is_completed ? "Em Andamento" : "Concluído"}
                             </Badge>
                           </div>
                         </div>
@@ -680,7 +675,7 @@ export default function DashboardPage() {
                           <Button variant="outline" size="sm">
                             <Eye className="h-4 w-4" />
                           </Button>
-                          {contract.status === "completed" ? (
+                          {contract.is_completed ? (
                             <Button size="sm">Avaliar</Button>
                           ) : (
                             <Button size="sm">Gerenciar</Button>
@@ -688,16 +683,16 @@ export default function DashboardPage() {
                         </div>
                       </div>
 
-                      {contract.status === "active" && (
+                      {!contract.is_completed && (
                         <div>
                           <div className="flex items-center justify-between text-sm mb-2">
                             <span>Progresso do Projeto</span>
-                            <span>{contract.progress}%</span>
+                            <span>50%</span>
                           </div>
                           <div className="w-full bg-gray-200 rounded-full h-2">
                             <div
                               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                              style={{ width: `${contract.progress}%` }}
+                              style={{ width: `50%` }}
                             ></div>
                           </div>
                         </div>
