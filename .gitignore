@@ -42,3 +42,8 @@ ehthumbs.db
 *.njsproj
 *.sln
 *.sw?
+.env
+
+# Prisma
+/lib/generated/prisma
+.env
