@@ -31,6 +31,7 @@ import {
   Users,
   ArrowLeft,
 } from "lucide-react"
+import { createClient } from '@/lib/supabase/client'
 
 type UserType = "freelancer" | "company"
 
@@ -160,7 +161,7 @@ export default function RegisterPage() {
 
     try {
       const response = await fetch("/api/auth/register", {
-        method: "POST",
+        method: "POST", // Send data to your API route
         headers: {
           "Content-Type": "application/json",
         },
@@ -172,15 +173,12 @@ export default function RegisterPage() {
       if (!response.ok) {
         throw new Error(data.error || "Falha ao criar a conta.")
       }
+      
+      setSuccess("Conta criada com sucesso! Redirecionando para o login...")
+      setTimeout(() => {
+        router.push("/auth/login")
+      }, 2000)
 
-      if (data.token) {
-        // Idealmente, salvar o token para login automático
-        // localStorage.setItem('token', data.token);
-        setSuccess("Conta criada com sucesso! Redirecionando...")
-        setTimeout(() => {
-          router.push("/dashboard")
-        }, 1500)
-      }
     } catch (err: any) {
       setError(
         err.message || "Ocorreu um erro. Verifique os dados e tente novamente."
@@ -208,32 +206,25 @@ export default function RegisterPage() {
   }
 
   const handleGoogleRegister = async () => {
-    setLoading(true)
+    const supabase = createClient()
     setError("")
-    setSuccess("")
-
-    // Simulação para desenvolvimento
-    const fakeGoogleToken = "fake-google-token-for-dev-register"
 
     try {
-      const response = await fetch("/api/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ googleToken: fakeGoogleToken, user_type: userType }),
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo: `${location.origin}/auth/callback`, // Rota que o Supabase redireciona após o login
+          data: {
+            user_type: userType, // Passa o tipo de usuário para o Supabase
+          },
+        },
       })
 
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || "Falha no registro com Google")
+      if (error) {
+        throw error
       }
-
-      localStorage.setItem("token", data.data.token) // Salva o token para login automático
-      setSuccess("Registro com Google bem-sucedido! Redirecionando...")
-      router.push("/dashboard")
     } catch (err: any) {
       setError(err.message || "Erro no registro com Google")
-    } finally {
-      setLoading(false)
     }
   }
 

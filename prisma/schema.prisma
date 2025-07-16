@@ -1,38 +1,159 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
 generator client {
-  provider = "prisma-client-js"
-  output   = "../lib/generated/prisma"
+  provider        = "prisma-client-js"
+  previewFeatures = ["referentialActions"] // Habilita onDelete/onUpdate
+}
+
+enum UserType {
+  admin
+  company
+  freelancer
+}
+
+enum ProjectStatus {
+  draft
+  open
+  in_progress
+  completed
+  cancelled
+}
+
+enum ProposalStatus {
+  pending
+  accepted
+  rejected
 }
 
 model User {
-  id         BigInt     @id @default(autoincrement())
-  name       String
-  avatar_url String?
-  messages   Message[] @relation("UserMessages")
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String    @unique
+  password_hash String?
+  name          String
+  user_type     UserType
+  avatar_url    String?
+  bio           String?
+  skills        String[]
+  company_name  String?
+  google_id     String?   @unique
+  is_active     Boolean   @default(true)
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  projects_company     Project[]  @relation("CompanyProjects")
+  projects_freelancer  Project[]  @relation("FreelancerProjects")
+  proposals            Proposal[]
+  messages_sent        Message[]
+  contracts_company    Contract[] @relation("CompanyContracts")
+  contracts_freelancer Contract[] @relation("FreelancerContracts")
+  reviews_given        Review[]   @relation("Reviewer")
+  reviews_received     Review[]   @relation("Reviewed")
 }
 
 model Message {
-  id         BigInt   @id @default(autoincrement())
-  project_id BigInt
-  sender_id  BigInt
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   content    String
   file_url   String?
   file_name  String?
   created_at DateTime @default(now())
 
-  // Relacionamentos
-  sender   User    @relation(fields: [sender_id], references: [id], name: "UserMessages")
-  project  Project @relation(fields: [project_id], references: [id])
+  project_id String  @db.Uuid
+  project    Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  sender_id  String  @db.Uuid
+  sender     User    @relation(fields: [sender_id], references: [id], onDelete: Cascade)
+
+  @@index([project_id])
 }
 
 model Project {
-  id         BigInt   @id @default(autoincrement())
-  created_at DateTime @default(now()) @db.Timestamptz(6)
-  name       String?
-  
-  messages   Message[]
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title           String
+  description     String
+  budget          Decimal       @db.Decimal(10, 2)
+  deadline        DateTime?     @db.Date
+  status          ProjectStatus @default(draft)
+  required_skills String[]
+
+  company_id      String        @db.Uuid
+  company         User          @relation("CompanyProjects", fields: [company_id], references: [id], onDelete: Cascade)
+
+  freelancer_id   String?       @db.Uuid
+  freelancer      User?         @relation("FreelancerProjects", fields: [freelancer_id], references: [id], onDelete: SetNull)
+
+  proposals       Proposal[]
+  messages        Message[]
+  contracts       Contract[]
+  created_at      DateTime      @default(now())
+  updated_at      DateTime      @updatedAt
+
+  @@index([company_id])
+  @@index([freelancer_id])
+  @@index([status])
+}
+
+model Proposal {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  message            String
+  proposed_budget    Decimal        @db.Decimal(10, 2)
+  estimated_duration Int? // em dias
+  status             ProposalStatus @default(pending)
+
+  project_id    String  @db.Uuid
+  project       Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  freelancer_id String  @db.Uuid
+  freelancer    User    @relation(fields: [freelancer_id], references: [id], onDelete: Cascade)
+
+  created_at    DateTime       @default(now())
+  updated_at    DateTime       @updatedAt
+
+  @@unique([project_id, freelancer_id])
+  @@index([project_id])
+  @@index([freelancer_id])
+}
+
+model Contract {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  budget       Decimal   @db.Decimal(10, 2)
+  start_date   DateTime  @db.Date
+  end_date     DateTime? @db.Date
+  terms        String
+  is_completed Boolean   @default(false)
+  created_at   DateTime  @default(now())
+
+  project_id    String  @db.Uuid
+  project       Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+
+  company_id    String  @db.Uuid
+  company       User    @relation("CompanyContracts", fields: [company_id], references: [id], onDelete: Cascade)
+
+  freelancer_id String  @db.Uuid
+  freelancer    User    @relation("FreelancerContracts", fields: [freelancer_id], references: [id], onDelete: Cascade)
+
+  reviews       Review[]
+}
+
+model Review {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rating      Int
+  comment     String?
+  created_at  DateTime @default(now())
+
+  contract_id String   @db.Uuid
+  contract    Contract @relation(fields: [contract_id], references: [id], onDelete: Cascade)
+
+  reviewer_id String   @db.Uuid
+  reviewer    User     @relation("Reviewer", fields: [reviewer_id], references: [id], onDelete: Cascade)
+
+  reviewed_id String   @db.Uuid
+  reviewed    User     @relation("Reviewed", fields: [reviewed_id], references: [id], onDelete: Cascade)
+
+  @@unique([contract_id, reviewer_id])
 }

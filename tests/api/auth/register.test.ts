@@ -1,87 +1,94 @@
 /**
  * @jest-environment node
  */
-import { POST } from "@/app/api/auth/register/route"
-import { type NextRequest } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase"
-import { hashPassword, generateToken } from "@/lib/auth"
+import { POST as registerUser } from "@/app/api/auth/register/route";
+import { createRequest } from "node-mocks-http";
 
-// Mock das dependências para isolar o teste da rota
-jest.mock("@/lib/supabase", () => ({
-  supabaseAdmin: {
-    from: jest.fn().mockReturnThis(),
-    select: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    single: jest.fn(),
+// Adicionar mock para 'next/headers' para evitar o erro "request scope"
+jest.mock("next/headers", () => ({
+  cookies: () => new Map(),
+}));
+
+// Mock do cliente Supabase
+const mockSignUp = jest.fn();
+const mockCreateRouteHandlerClient = jest.fn(() => ({
+  auth: {
+    signUp: mockSignUp,
   },
-}))
+}));
 
-jest.mock("@/lib/auth", () => ({
-  hashPassword: jest.fn(),
-  generateToken: jest.fn(),
-}))
+jest.mock("@supabase/auth-helpers-nextjs", () => ({
+  createRouteHandlerClient: (...args: any[]) =>
+    mockCreateRouteHandlerClient(...args),
+}));
 
 describe("API /api/auth/register", () => {
-  // Limpa os mocks antes de cada teste
   beforeEach(() => {
-    ;(supabaseAdmin.from as jest.Mock).mockClear()
-    ;(hashPassword as jest.Mock).mockClear()
-    ;(generateToken as jest.Mock).mockClear()
-  })
+    // Limpa os mocks antes de cada teste
+    jest.clearAllMocks();
+  });
 
-  test("deve registrar um novo usuário com sucesso", async () => {
-    const userData = {
-      email: "newuser@example.com",
+  it("deve registrar um novo usuário com sucesso", async () => {
+    const newUser = {
+      email: "test@example.com",
       password: "password123",
-      name: "New User",
+      name: "Test User",
       user_type: "freelancer",
-    }
+      skills: ["React", "Node.js"],
+    };
 
-    // Simula as chamadas ao banco de dados e funções de auth
-    ;(supabaseAdmin.from("users").select().eq().single as jest.Mock).mockResolvedValueOnce({ data: null }) // Nenhum usuário existente
-    ;(hashPassword as jest.Mock).mockResolvedValueOnce("hashed_password")
-    ;(supabaseAdmin.from("users").insert().select().single as jest.Mock).mockResolvedValueOnce({
-      data: { id: "new-user-id", ...userData, password_hash: "hashed_password" },
+    // Configura o mock de signUp para sucesso
+    mockSignUp.mockResolvedValue({
+      data: { user: { id: "12345", email: newUser.email } },
       error: null,
-    })
-    ;(generateToken as jest.Mock).mockReturnValueOnce("new-fake-token")
+    });
 
-    const req = {
-      json: async () => userData,
-    } as NextRequest
+    const req = createRequest({
+      method: "POST",
+      json: () => Promise.resolve(newUser),
+    });
 
-    const response = await POST(req)
-    const body = await response.json()
+    const res = await registerUser(req as any);
+    const json = await res.json();
 
-    expect(response.status).toBe(200)
-    expect(body.data.user.email).toBe(userData.email)
-    expect(body.data.token).toBe("new-fake-token")
-    expect(body.data.user).not.toHaveProperty("password_hash")
-  })
+    expect(res.status).toBe(201);
+    expect(json.user).toBeDefined();
+    expect(json.user.email).toBe(newUser.email);
+    expect(mockSignUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: newUser.email,
+        password: newUser.password,
+      })
+    );
+  });
 
-  test("deve falhar se o email já estiver registrado", async () => {
-    const userData = {
-      email: "existing@example.com",
+  it("deve falhar se o email já estiver registrado", async () => {
+    const existingUser = {
+      email: "exists@example.com",
       password: "password123",
       name: "Existing User",
       user_type: "company",
-    }
+    };
 
-    // Simula que o usuário já existe no banco
-    ;(supabaseAdmin.from("users").select().eq().single as jest.Mock).mockResolvedValueOnce({
-      data: { id: "existing-id", email: userData.email },
-      error: null,
-    })
+    // Configura o mock de signUp para erro de usuário já existente
+    const authError = {
+      message: "User already registered",
+      status: 400,
+    };
+    mockSignUp.mockResolvedValue({
+      data: { user: null },
+      error: authError,
+    });
 
-    const req = {
-      json: async () => userData,
-    } as NextRequest
+    const req = createRequest({
+      method: "POST",
+      json: () => Promise.resolve(existingUser),
+    });
 
-    const response = await POST(req)
-    const body = await response.json()
+    const res = await registerUser(req as any);
+    const json = await res.json();
 
-    expect(response.status).toBe(409)
-    expect(body.error).toBe("Email already registered")
-  })
-})
+    expect(res.status).toBe(400);
+    expect(json.error).toBe(authError.message);
+  });
+});

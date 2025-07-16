@@ -2,27 +2,32 @@
  * @jest-environment node
  */
 import { POST } from "@/app/api/projects/route";
-import { type NextRequest } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import * as AuthMiddleware from "@/middleware/auth";
+import { createRequest } from "node-mocks-http";
 
-// Mock das dependências
-jest.mock("@/lib/supabase", () => ({
-  supabaseAdmin: {
-    from: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    select: jest.fn().mockReturnThis(),
-    single: jest.fn(),
+// Adicionar mock para 'next/headers' para evitar o erro "request scope"
+jest.mock("next/headers", () => ({
+  cookies: () => new Map(),
+}));
+
+// Mock do cliente Supabase e validação
+const mockGetUser = jest.fn();
+const mockInsert = jest.fn();
+
+const mockFrom = jest.fn(() => ({
+  insert: mockInsert,
+}));
+
+const mockCreateRouteHandlerClient = jest.fn(() => ({
+  auth: {
+    getUser: mockGetUser,
   },
+  from: mockFrom,
 }));
 
-// Mock do middleware de autenticação
-jest.mock("@/middleware/auth", () => ({
-  ...jest.requireActual("@/middleware/auth"), // Importa as funções reais
-  requireUserType: jest.fn(), // Mocka apenas a função que queremos controlar
+jest.mock("@supabase/auth-helpers-nextjs", () => ({
+  createRouteHandlerClient: (...args: any[]) =>
+    mockCreateRouteHandlerClient(...args),
 }));
-
-const mockRequireUserType = AuthMiddleware.requireUserType as jest.Mock;
 
 describe("API /api/projects", () => {
   beforeEach(() => {
@@ -30,67 +35,137 @@ describe("API /api/projects", () => {
   });
 
   describe("POST", () => {
-    test("deve criar um projeto com sucesso para um usuário do tipo 'company'", async () => {
-      const mockUser = { id: "company-user-id", user_type: "company" };
+    it("deve criar um projeto com sucesso para um usuário do tipo 'company'", async () => {
       const projectData = {
         title: "Novo Projeto de Teste",
-        description: "Descrição detalhada do novo projeto de teste.",
+        description:
+          "Esta é uma descrição detalhada o suficiente para o teste passar.",
         budget: 5000,
-        required_skills: ["React", "Node.js"],
+        required_skills: ["React", "TypeScript"],
       };
 
-      // Configura o mock do middleware para simular um usuário autenticado
-      mockRequireUserType.mockImplementation(() => (request: NextRequest) => {
-        (request as any).user = mockUser;
-        return null; // Retorna null para indicar sucesso na autenticação
-      });
-
-      // Configura o mock do Supabase para simular a inserção no banco
-      (
-        supabaseAdmin.from("projects").insert().select().single as jest.Mock
-      ).mockResolvedValueOnce({
-        data: { id: "new-project-id", ...projectData, company_id: mockUser.id },
+      // Simula um usuário autenticado do tipo 'company'
+      mockGetUser.mockResolvedValue({
+        data: {
+          user: {
+            id: "company-user-id",
+            user_metadata: { user_type: "company" },
+          },
+        },
         error: null,
       });
 
-      const req = {
-        json: async () => projectData,
-      } as NextRequest;
+      // Simula o sucesso da inserção no banco
+      mockInsert.mockReturnValue({
+        select: jest.fn().mockReturnValue({
+          single: jest
+            .fn()
+            .mockResolvedValue({
+              data: { id: "new-project-id", ...projectData },
+              error: null,
+            }),
+        }),
+      });
 
-      const response = await POST(req);
-      const body = await response.json();
+      const req = createRequest({
+        method: "POST",
+        json: () => Promise.resolve(projectData),
+      });
 
-      expect(response.status).toBe(201);
-      expect(body.data.title).toBe(projectData.title);
-      expect(body.message).toBe("Project created successfully");
+      const res = await POST(req as any);
+      const json = await res.json();
+
+      expect(res.status).toBe(201);
+      expect(json.id).toBe("new-project-id");
+      expect(json.title).toBe(projectData.title);
+      expect(mockFrom).toHaveBeenCalledWith("projects");
+      expect(mockInsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ...projectData,
+          company_id: "company-user-id",
+        })
+      );
     });
 
-    test("deve retornar erro 403 se um freelancer tentar criar um projeto", async () => {
-      const mockUser = { id: "freelancer-user-id", user_type: "freelancer" };
+    it("deve retornar erro 403 se um freelancer tentar criar um projeto", async () => {
+      const projectData = {
+        title: "Projeto Inválido",
+        description: "Um freelancer não deveria poder criar isso.",
+        budget: 1000,
+        required_skills: ["Jest"],
+      };
 
-      // Configura o mock do middleware para retornar um erro de permissão
-      mockRequireUserType.mockImplementation(
-        (types) => (request: NextRequest) => {
-          if (!types.includes(mockUser.user_type)) {
-            const { NextResponse } = require("next/server");
-            return NextResponse.json(
-              { error: "Access denied. Required user type: company" },
-              { status: 403 }
-            );
-          }
-          return null;
-        }
-      );
+      // Simula um usuário autenticado do tipo 'freelancer'
+      mockGetUser.mockResolvedValue({
+        data: {
+          user: {
+            id: "freelancer-user-id",
+            user_metadata: { user_type: "freelancer" },
+          },
+        },
+        error: null,
+      });
 
-      const req = {
-        json: async () => ({ title: "Projeto Inválido" }),
-      } as NextRequest;
+      const req = createRequest({
+        method: "POST",
+        json: () => Promise.resolve(projectData),
+      });
 
-      const response = await POST(req);
-      const body = await response.json();
+      const res = await POST(req as any);
+      const json = await res.json();
 
-      expect(response.status).toBe(403);
-      expect(body.error).toContain("Access denied");
+      expect(res.status).toBe(403);
+      expect(json.error).toBe("Apenas empresas podem criar projetos.");
+      expect(mockInsert).not.toHaveBeenCalled();
+    });
+
+    it("deve retornar erro 400 se os dados forem inválidos", async () => {
+      const invalidProjectData = {
+        title: "a", // menor que 5
+        description: "b", // menor que 20
+        budget: -100, // não é positivo
+        required_skills: [], // array vazio
+      };
+
+      mockGetUser.mockResolvedValue({
+        data: {
+          user: {
+            id: "company-user-id",
+            user_metadata: { user_type: "company" },
+          },
+        },
+        error: null,
+      });
+
+      const req = createRequest({
+        method: "POST",
+        json: () => Promise.resolve(invalidProjectData),
+      });
+
+      const res = await POST(req as any);
+      const json = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(json.errors).toBeDefined();
+      expect(json.errors.title).toBeDefined();
+      expect(json.errors.description).toBeDefined();
+      expect(json.errors.budget).toBeDefined();
+      expect(json.errors.required_skills).toBeDefined();
+    });
+
+    it("deve retornar erro 401 se o usuário não estiver autenticado", async () => {
+      mockGetUser.mockResolvedValue({ data: { user: null }, error: null });
+
+      const req = createRequest({
+        method: "POST",
+        json: () => Promise.resolve({}),
+      });
+
+      const res = await POST(req as any);
+      const json = await res.json();
+
+      expect(res.status).toBe(401);
+      expect(json.error).toBe("Não autorizado");
     });
   });
 });
