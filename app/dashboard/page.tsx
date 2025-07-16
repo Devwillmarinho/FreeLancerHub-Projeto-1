@@ -1,6 +1,5 @@
 "use client";
 
-import type { Project, Proposal, Contract } from "@prisma/client";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +52,46 @@ import {
   Search,
 } from "lucide-react";
 
+interface DashboardProject {
+  id: string;
+  title: string;
+  budget: number;
+  deadline: string;
+  status: string;
+  freelancer: string | null;
+  messages?: number;
+  progress?: number;
+}
+
+interface DashboardProposal {
+  id: string;
+  project: {
+    title: string;
+  };
+  freelancer: {
+    name: string;
+    avatar_url: string | null;
+    rating: number | null;
+  };
+  proposed_budget: number;
+  estimated_duration: number;
+  status: string;
+}
+
+interface DashboardContract {
+  id: string;
+  project: {
+    title: string;
+  };
+  freelancer: {
+    name: string;
+    rating: number | null;
+  };
+  budget: number;
+  start_date: string;
+  is_completed: boolean;
+}
+
 export default function DashboardPage() {
   const [userType] = useState<"company" | "freelancer" | "admin">("company");
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
@@ -65,11 +104,11 @@ export default function DashboardPage() {
     skills: "",
     category: "",
   });
-  const [projects, setProjects] = useState<any[]>([]);
+  const [projects, setProjects] = useState<DashboardProject[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
-  const [proposals, setProposals] = useState<any[]>([]);
+  const [proposals, setProposals] = useState<DashboardProposal[]>([]);
   const [isLoadingProposals, setIsLoadingProposals] = useState(true);
-  const [contracts, setContracts] = useState<any[]>([]);
+  const [contracts, setContracts] = useState<DashboardContract[]>([]);
   const [isLoadingContracts, setIsLoadingContracts] = useState(true);
 
   const stats = [
@@ -110,13 +149,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchProjects() {
       try {
-        const token = localStorage.getItem("token"); // Pega o token salvo
-        const response = await fetch("/api/projects", {
-          headers: {
-            // Envia o token para a API para autenticação
-            Authorization: `Bearer ${token}`,
-          },
-        });
+        const response = await fetch("/api/projects"); // O cookie é enviado automaticamente
         if (!response.ok) {
           throw new Error("Falha ao buscar projetos");
         }
@@ -134,10 +167,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchProposals() {
       try {
-        const token = localStorage.getItem("token");
-        const response = await fetch("/api/proposals", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await fetch("/api/proposals"); // O cookie é enviado automaticamente
         if (!response.ok) {
           throw new Error("Falha ao buscar propostas");
         }
@@ -155,10 +185,7 @@ export default function DashboardPage() {
   useEffect(() => {
     async function fetchContracts() {
       try {
-        const token = localStorage.getItem("token");
-        const response = await fetch("/api/contracts", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const response = await fetch("/api/contracts"); // O cookie é enviado automaticamente
         if (!response.ok) {
           throw new Error("Falha ao buscar contratos");
         }
@@ -200,14 +227,12 @@ export default function DashboardPage() {
   };
 
   const handleCreateProject = async () => {
-    const token = localStorage.getItem("token");
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
+        }, // O cookie é enviado automaticamente
         body: JSON.stringify({
           title: newProject.title,
           description: newProject.description,

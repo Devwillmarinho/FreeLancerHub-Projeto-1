@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import {
@@ -24,7 +24,7 @@ import {
   ArrowLeft,
   Users,
 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client"
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -34,7 +34,7 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState("")
-  const [success, setSuccess] = useState("")
+  const [success, setSuccess] = useState("");
   const [rememberMe, setRememberMe] = useState(false)
   const router = useRouter()
 
@@ -44,7 +44,7 @@ export default function LoginPage() {
     return () => {
       document.documentElement.classList.remove("h-full")
     }
-  }, [])
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -59,24 +59,28 @@ export default function LoginPage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(formData),
-      })
+      });
 
-      const data = await response.json()
+      const data = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || "Falha no login")
       }
 
-      if (data.token) {
-        localStorage.setItem("token", data.token) // Salva o token no navegador
-        setSuccess("Login realizado com sucesso! Redirecionando...")
+      setSuccess("Login realizado com sucesso! Redirecionando...")
+
         setTimeout(() => {
           router.push("/dashboard")
         }, 1500)
-      }
     } catch (err: any) {
+      setError(err.message || "Erro de conexão. Tente novamente.");
+          setTimeout(() => {
+          }, 1500)
+
       setError(err.message || "Erro de conexão. Tente novamente.")
-    } finally {
+      
+
+    }finally {
       setLoading(false)
     }
   }
@@ -84,7 +88,6 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setLoading(true)
     setError("")
-    
 
     try {
       const supabase = createClient()
@@ -102,7 +105,7 @@ export default function LoginPage() {
      } finally {
        setLoading(false);
      }
-   };
+  };
 
   const features = [
     {
@@ -120,7 +123,7 @@ export default function LoginPage() {
       title: "Comunidade Ativa",
       description: "Mais de 15.000 profissionais conectados",
     },
-  ]
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex">
@@ -329,6 +332,6 @@ export default function LoginPage() {
         <div className="absolute bottom-20 left-20 w-24 h-24 bg-white/20 rounded-full animate-bounce"></div>
         <div className="absolute top-1/2 left-10 w-16 h-16 bg-white/20 rounded-full animate-ping"></div>
       </div>
-    </div>
-  )
+        </div>
+    );
 }
