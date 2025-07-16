@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
@@ -24,6 +24,7 @@ import {
   ArrowLeft,
   Users,
 } from "lucide-react"
+import { createClient } from "@/lib/supabase/client"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -36,6 +37,14 @@ export default function LoginPage() {
   const [success, setSuccess] = useState("")
   const [rememberMe, setRememberMe] = useState(false)
   const router = useRouter()
+
+  useEffect(() => {
+    // Persist theme on mount
+    document.documentElement.classList.add("h-full")
+    return () => {
+      document.documentElement.classList.remove("h-full")
+    }
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -75,34 +84,25 @@ export default function LoginPage() {
   const handleGoogleLogin = async () => {
     setLoading(true)
     setError("")
-    setSuccess("")
-
-    // Em um projeto real, você usaria a biblioteca do Google para obter o token.
-    // Por enquanto, vamos simular a obtenção de um token para testar a API.
-    const fakeGoogleToken = "fake-google-token-for-dev"
+    
 
     try {
-      const response = await fetch("/api/auth/google", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // O tipo de usuário pode ser selecionado em um modal antes do login com Google
-        body: JSON.stringify({ googleToken: fakeGoogleToken, user_type: "freelancer" }),
-      })
-
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || "Falha no login com Google")
-      }
-
-      localStorage.setItem("token", data.data.token) // Salva o token
-      setSuccess("Login com Google bem-sucedido! Redirecionando...")
-      router.push("/dashboard")
-    } catch (err: any) {
-      setError(err.message || "Erro no login com Google")
-    } finally {
-      setLoading(false)
-    }
-  }
+      const supabase = createClient()
+       const { error } = await supabase.auth.signInWithOAuth({
+         provider: "google",
+         options: {
+           redirectTo: `${location.origin}/auth/callback`,
+         },
+       });
+       if (error) {
+         setError(error.message);
+       }
+     } catch (err: any) {
+       setError(err.message || "Erro no login com Google");
+     } finally {
+       setLoading(false);
+     }
+   };
 
   const features = [
     {
@@ -283,9 +283,9 @@ export default function LoginPage() {
 
       {/* Right Side - Features */}
       <div className="hidden lg:flex flex-1 bg-gradient-to-br from-blue-600 to-purple-600 p-12 items-center justify-center relative overflow-hidden">
-        <div className="absolute inset-0 bg-black/10"></div>
+        <div className="absolute inset-0 bg-black/20"></div>
         <div className="relative z-10 text-white max-w-lg">
-          <h2 className="text-4xl font-bold mb-6">Conecte-se ao futuro do trabalho</h2>
+          <h2 className="text-4xl font-bold mb-6">Bem-vindo de volta!</h2>
           <p className="text-xl mb-12 opacity-90">
             Junte-se a milhares de profissionais que já transformaram suas carreiras conosco.
           </p>
@@ -325,8 +325,9 @@ export default function LoginPage() {
         </div>
 
         {/* Decorative elements */}
-        <div className="absolute top-20 right-20 w-32 h-32 bg-white/10 rounded-full animate-pulse"></div>
-        <div className="absolute bottom-20 left-20 w-24 h-24 bg-white/10 rounded-full animate-bounce"></div>
+        <div className="absolute top-20 right-20 w-32 h-32 bg-white/20 rounded-full animate-pulse"></div>
+        <div className="absolute bottom-20 left-20 w-24 h-24 bg-white/20 rounded-full animate-bounce"></div>
+        <div className="absolute top-1/2 left-10 w-16 h-16 bg-white/20 rounded-full animate-ping"></div>
       </div>
     </div>
   )

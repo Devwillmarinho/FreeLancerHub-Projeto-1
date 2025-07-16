@@ -1,131 +1,61 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase"
-import { authMiddleware, requireUserType } from "@/middleware/auth"
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
-export async function GET(request: NextRequest) {
-  const authResult = await authMiddleware(request)
-  if (authResult) return authResult
+const createProjectSchema = z.object({
+  title: z.string().min(5, 'O título deve ter pelo menos 5 caracteres.'),
+  description: z.string().min(20, 'A descrição deve ter pelo menos 20 caracteres.'),
+  budget: z.number().positive('O orçamento deve ser um número positivo.'),
+  required_skills: z.array(z.string()).min(1, 'Pelo menos uma habilidade é necessária.'),
+});
 
-  try {
-    const { searchParams } = new URL(request.url)
-    const page = Number.parseInt(searchParams.get("page") || "1")
-    const limit = Number.parseInt(searchParams.get("limit") || "10")
-    const status = searchParams.get("status")
-    const skills = searchParams.get("skills")?.split(",")
+export async function POST(request: Request) {
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
-    const user = (request as any).user
-    const offset = (page - 1) * limit
+  // Obter o usuário logado para autorização
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    let query = supabaseAdmin
-      .from("projects")
-      .select(`
-        *,
-        company:users!projects_company_id_fkey(id, name, company_name),
-        freelancer:users!projects_freelancer_id_fkey(id, name),
-        proposals(id, freelancer_id, status)
-      `, { count: 'exact' }) // Adiciona a contagem total
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1)
-
-    // Filtros baseados no tipo de usuário
-    if (user.user_type === "company") {
-      query = query.eq("company_id", user.id)
-    } else if (user.user_type === "freelancer") {
-      // Freelancers veem projetos abertos ou onde são o freelancer
-      query = query.or(`status.eq.open,freelancer_id.eq.${user.id}`)
-    }
-
-    // Filtros adicionais
-    if (status) {
-      query = query.eq("status", status)
-    }
-
-    if (skills && skills.length > 0) {
-      query = query.overlaps("required_skills", skills)
-    }
-
-    const { data: projects, error, count } = await query
-
-    if (error) {
-      return NextResponse.json({ error: "Failed to fetch projects" }, { status: 500 })
-    }
-
-    return NextResponse.json({
-      data: projects,
-      pagination: {
-        page,
-        limit,
-        total: count,
-      },
-    })
-  } catch (error) {
-    console.error("Projects fetch error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  if (!user) {
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
   }
-}
 
-export async function POST(request: NextRequest) {
-  const authResult = await requireUserType(["company"])(request)
-  if (authResult) return authResult
-
-  try {
-    const body = await request.json()
-    const user = (request as any).user
-
-    const { title, description, budget, deadline, required_skills } = body
-
-    // Validação básica
-    if (!title || !description || !budget || !required_skills) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
-    }
-
-    if (title.length < 5) {
-      return NextResponse.json({ error: "Title must be at least 5 characters" }, { status: 400 })
-    }
-
-    if (description.length < 20) {
-      return NextResponse.json({ error: "Description must be at least 20 characters" }, { status: 400 })
-    }
-
-    if (budget <= 0) {
-      return NextResponse.json({ error: "Budget must be a positive number" }, { status: 400 })
-    }
-
-    if (!Array.isArray(required_skills) || required_skills.length === 0) {
-      return NextResponse.json({ error: "At least one skill is required" }, { status: 400 })
-    }
-
-    const { data: project, error } = await supabaseAdmin
-      .from("projects")
-      .insert({
-        title,
-        description,
-        budget,
-        deadline,
-        required_skills,
-        company_id: user.id,
-        status: "open",
-      })
-      .select(`
-        *,
-        company:users!projects_company_id_fkey(id, name, company_name)
-      `)
-      .single()
-
-    if (error) {
-      console.error("Project creation error:", error)
-      return NextResponse.json({ error: "Failed to create project" }, { status: 500 })
-    }
-
+  // A VERIFICAÇÃO QUE FALTAVA:
+  // Só permite a criação do projeto se o tipo de usuário for 'company'.
+  if (user.user_metadata.user_type !== 'company') {
     return NextResponse.json(
-      {
-        data: project,
-        message: "Project created successfully",
-      },
-      { status: 201 },
-    )
-  } catch (error) {
-    console.error("Project creation error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      { error: 'Apenas empresas podem criar projetos.' },
+      { status: 403 }
+    );
   }
+
+  const body = await request.json();
+
+  // Validar os dados
+  const validation = createProjectSchema.safeParse(body);
+  if (!validation.success) {
+    return NextResponse.json(
+      { errors: validation.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+
+  // Inserir no banco de dados
+  const { data, error } = await supabase
+    .from('projects')
+    .insert({
+      ...validation.data,
+      company_id: user.id, // Associar o projeto à empresa logada
+    })
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json(data, { status: 201 });
 }

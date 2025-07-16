@@ -1,68 +1,104 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase"
-import { authMiddleware } from "@/middleware/auth"
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { formidable } from "formidable";
+import fs from "node:fs/promises";
+import path from "node:path";
+import prisma from "@/lib/prisma"; // Assumindo que seu Prisma Client está em /lib
+import { supabase } from "@/lib/supabaseClient"; // Assumindo que seu Supabase Client está em /lib
 
-export async function POST(request: NextRequest) {
-  const authResult = await authMiddleware(request)
-  if (authResult) return authResult
+// Helper para obter o ID do usuário a partir do token (adapte conforme sua implementação de autenticação)
+import { getUserIdFromRequest } from "@/lib/auth-helpers";
 
+// IMPORTANTE: Desativa o bodyParser padrão do Next.js para esta rota específica.
+// Isso é necessário para que o formidable consiga processar o fluxo do formulário.
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+};
+
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json()
-    const user = (request as any).user
-
-    const { project_id, content, file_url, file_name } = body
-
-    if (!project_id || !content) {
-      return NextResponse.json({ error: "Project ID and content are required" }, { status: 400 })
+    // 1. Autenticar o usuário
+    const senderId = await getUserIdFromRequest(req);
+    if (!senderId) {
+      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
     }
 
-    // Verificar se o usuário tem acesso ao projeto
-    const { data: project, error: projectError } = await supabaseAdmin
-      .from("projects")
-      .select("company_id, freelancer_id")
-      .eq("id", project_id)
-      .single()
+    // 2. Processar o formulário com 'formidable'
+    const form = formidable();
+    const [fields, files] = await form.parse(req as any);
 
-    if (projectError || !project) {
-      return NextResponse.json({ error: "Project not found" }, { status: 404 })
+    // Extrair os campos de texto do formulário
+    const projectId = fields.projectId?.[0];
+    const content = fields.content?.[0];
+
+    if (!projectId || !content) {
+      return NextResponse.json(
+        { error: "ID do projeto e conteúdo da mensagem são obrigatórios." },
+        { status: 400 }
+      );
     }
 
-    const canSendMessage =
-      user.user_type === "admin" || project.company_id === user.id || project.freelancer_id === user.id
+    // 3. Lidar com o upload do arquivo, se existir
+    let fileUrl: string | null = null;
+    let fileName: string | null = null;
+    const uploadedFile = files.attachment?.[0];
 
-    if (!canSendMessage) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 })
+    if (uploadedFile) {
+      // Ler o arquivo do caminho temporário
+      const fileContent = await fs.readFile(uploadedFile.filepath);
+      const uniqueFileName = `${Date.now()}-${uploadedFile.originalFilename}`;
+
+      // Fazer o upload para o Supabase Storage
+      // Certifique-se de ter um bucket chamado 'project-files' no seu Supabase.
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from("project-files") // Nome do seu bucket
+        .upload(uniqueFileName, fileContent, {
+          contentType: uploadedFile.mimetype || "application/octet-stream",
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error("Supabase Upload Error:", uploadError);
+        throw new Error("Falha ao fazer upload do arquivo.");
+      }
+
+      // Obter a URL pública do arquivo
+      const { data: publicUrlData } = supabase.storage
+        .from("project-files")
+        .getPublicUrl(uploadData.path);
+
+      fileUrl = publicUrlData.publicUrl;
+      fileName = uploadedFile.originalFilename;
+
+      // Opcional: remover o arquivo temporário
+      await fs.unlink(uploadedFile.filepath);
     }
 
-    const { data: message, error } = await supabaseAdmin
-      .from("messages")
-      .insert({
-        project_id,
-        sender_id: user.id,
+    // 4. Salvar a mensagem no banco de dados com Prisma
+     const newMessage = await prisma.message.create({
+      data: {
+        project_id: projectId,
+        sender_id: senderId,
         content,
-        file_url,
-        file_name,
-      })
-      .select(`
-        *,
-        sender:users!messages_sender_id_fkey(id, name, avatar_url, user_type)
-      `)
-      .single()
-
-    if (error) {
-      console.error("Message creation error:", error)
-      return NextResponse.json({ error: "Failed to send message" }, { status: 500 })
-    }
-
-    return NextResponse.json(
-      {
-        data: message,
-        message: "Message sent successfully",
+        file_url: fileUrl,
+        file_name: fileName,
       },
-      { status: 201 },
-    )
-  } catch (error) {
-    console.error("Message creation error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      include: {
+        // Incluir dados do remetente para exibir no frontend
+        sender: {
+          select: { name: true, avatar_url: true },
+        },
+      },
+    });
+
+    return NextResponse.json(newMessage, { status: 201 });
+  } catch (error: any) {
+    console.error("API Message POST Error:", error);
+    return NextResponse.json(
+      { error: error.message || "Ocorreu um erro interno no servidor." },
+      { status: 500 }
+    );
   }
 }

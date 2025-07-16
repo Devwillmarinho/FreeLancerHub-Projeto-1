@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Filter, DollarSign, Calendar, MapPin, Users, Briefcase } from "lucide-react"
 
 export default function ProjectsPage() {
@@ -14,14 +15,17 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
+    const router = useRouter()
   useEffect(() => {
-    async function fetchOpenProjects() {
+    // Agora vamos buscar todos os projetos, o filtro será feito no frontend
+    async function fetchAllProjects() {
       setIsLoading(true)
       try {
-        // Esta é uma rota pública, então não precisa de token
-        const response = await fetch("/api/projects?status=open")
+        // Criar uma API route em /api/projects que retorna todos os projetos
+        // com informações da empresa e contagem de propostas
+        const response = await fetch("/api/projects")
         if (!response.ok) {
-          throw new Error("Falha ao buscar projetos abertos")
+          throw new Error("Falha ao buscar projetos")
         }
         const data = await response.json()
         setProjects(data.data)
@@ -31,8 +35,33 @@ export default function ProjectsPage() {
         setIsLoading(false)
       }
     }
-    fetchOpenProjects()
+    fetchAllProjects()
   }, [])
+
+  const handleAcceptProposal = async (proposalId: string) => {
+    try {
+      const response = await fetch(`/api/proposals/${proposalId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: "accepted" }),
+      });
+
+      if (!response.ok) {
+        // If not ok, it will redirect to same page
+        router.refresh();
+        throw new Error(`Failed to accept proposal: ${response.status}`);
+      }
+
+      // If accepted, reload the data from server
+      router.refresh();
+
+    } catch (error: any) {
+      console.error("Error accepting proposal:", error);
+      alert(error.message || "Failed to accept proposal");
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -64,7 +93,7 @@ export default function ProjectsPage() {
     const matchesSearch =
       project.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
       project.description.toLowerCase().includes(searchTerm.toLowerCase())
-    const matchesStatus = statusFilter === "all" || project.status === statusFilter || project.status === "open"
+    const matchesStatus = statusFilter === "all" || project.status === statusFilter
     return matchesSearch && matchesStatus
   })
 
@@ -157,7 +186,8 @@ export default function ProjectsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Propostas Totais</p>
-                  <p className="text-2xl font-bold text-gray-900">{projects.reduce((acc, p) => acc + p.proposals.length, 0)}</p>
+                  {/* A contagem de propostas deve vir da API para ser performático */}
+                  <p className="text-2xl font-bold text-gray-900">{projects.reduce((acc, p) => acc + (p.proposals_count || 0), 0)}</p>
                 </div>
                 <Users className="h-8 w-8 text-purple-600" />
               </div>
@@ -197,7 +227,7 @@ export default function ProjectsPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <Users className="h-4 w-4" />
-                      <span>{project.proposals.length} propostas</span>
+                      <span>{project.proposals_count || 0} propostas</span>
                     </div>
                   </div>
 
@@ -219,10 +249,13 @@ export default function ProjectsPage() {
                       <p className="text-sm font-medium text-gray-900">{project.company.company_name}</p>
                       {project.freelancer && <p className="text-sm text-gray-600">Freelancer: {project.freelancer}</p>}
                     </div>
-                    <div className="flex gap-2">
-                      <Button variant="outline" size="sm">
-                        Ver Detalhes
-                      </Button>
+                      <div className="flex gap-2">
+                      {project.status === "open" && (
+                        <Button size="sm" onClick={() => handleAcceptProposal(project.id)}>
+                            Aceitar Proposta
+                        </Button>
+                      )}
+
                       {project.status === "open" && <Button size="sm">Enviar Proposta</Button>}
                     </div>
                   </div>
