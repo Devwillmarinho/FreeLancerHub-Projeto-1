@@ -1,5 +1,6 @@
 "use client";
 
+import type { Project, Proposal, Contract } from "@prisma/client";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -68,8 +69,8 @@ export default function DashboardPage() {
   const [isLoadingProjects, setIsLoadingProjects] = useState(true);
   const [proposals, setProposals] = useState<any[]>([]);
   const [isLoadingProposals, setIsLoadingProposals] = useState(true);
-   const [contracts, setContracts] = useState<any[]>([])
-  const [isLoadingContracts, setIsLoadingContracts] = useState(true)
+  const [contracts, setContracts] = useState<any[]>([]);
+  const [isLoadingContracts, setIsLoadingContracts] = useState(true);
 
   const stats = [
     {
