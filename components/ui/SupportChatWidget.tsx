@@ -85,7 +85,19 @@ export function SupportChatWidget() {
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new])
+          const newMessage = payload.new as {
+            id: string | number
+            sender_type: "user" | "assistant"
+            content: string
+          }
+
+          // Apenas adiciona a mensagem se for do assistente, para evitar duplicar a do usuário
+          if (newMessage.sender_type === "assistant") {
+            setMessages((prev) => [
+              ...prev,
+              { id: newMessage.id.toString(), role: "assistant", content: newMessage.content },
+            ])
+          }
         }
       )
       .subscribe()
@@ -93,7 +105,7 @@ export function SupportChatWidget() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [conversationId, supabase])
+  }, [conversationId, supabase, setMessages])
 
   return (
     <div className="fixed bottom-6 right-6 z-50">
