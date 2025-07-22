@@ -10,6 +10,35 @@ const createProjectSchema = z.object({
   required_skills: z.array(z.string()).min(1, 'Pelo menos uma habilidade é necessária.'),
 });
 
+/**
+ * GET: Lista todos os projetos.
+ * A segurança é garantida pelas Políticas de RLS (Row Level Security) no Supabase.
+ * - Usuários autenticados podem ver todos os projetos.
+ */
+export async function GET(request: Request) {
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+
+  const { data: { session } } = await supabase.auth.getSession();
+
+  if (!session) {
+    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  }
+
+  // A RLS já filtra os dados, então a query é simples.
+  const { data: projects, error } = await supabase
+    .from('projects')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching projects:', error);
+    return NextResponse.json({ error: 'Falha ao buscar projetos' }, { status: 500 });
+  }
+
+  return NextResponse.json({ data: projects }, { status: 200 });
+}
+
 export async function POST(request: Request) {
   const cookieStore = cookies();
   const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
@@ -23,15 +52,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
   }
 
-  // A VERIFICAÇÃO QUE FALTAVA:
-  // Só permite a criação do projeto se o tipo de usuário for 'company'.
-  if (user.user_metadata.user_type !== 'company') {
-    return NextResponse.json(
-      { error: 'Apenas empresas podem criar projetos.' },
-      { status: 403 }
-    );
-  }
-
+  // A verificação de `user_metadata` foi removida.
+  // A política de RLS no banco de dados é a fonte de verdade para autorização.
+  // Se um não-empresa tentar inserir, o Supabase retornará um erro de violação de RLS.
   const body = await request.json();
 
   // Validar os dados
@@ -44,7 +67,7 @@ export async function POST(request: Request) {
   }
 
   // Inserir no banco de dados
-  const { data, error } = await supabase
+  const { data: newProject, error } = await supabase
     .from('projects')
     .insert({
       ...validation.data,
@@ -54,8 +77,16 @@ export async function POST(request: Request) {
     .single();
 
   if (error) {
+    // Verifica se o erro é de violação de RLS para dar uma mensagem mais clara
+    if (error.code === '42501') {
+      return NextResponse.json(
+        { error: 'Apenas empresas podem criar projetos.' },
+        { status: 403 } // 403 Forbidden
+      );
+    }
+    console.error('Project creation error:', error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json(data, { status: 201 });
+  return NextResponse.json({ data: newProject }, { status: 201 });
 }
