@@ -1,81 +1,77 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
+import { z } from "zod"
 import { supabaseAdmin } from "@/lib/supabase"
-import { authMiddleware } from "@/middleware/auth"
+import { authMiddleware, requireUserType } from "@/middleware/auth"
+import { NextRequestWithUser } from "@/types"
 
-export async function GET(request: NextRequest) {
-  const authResult = await authMiddleware(request)
-  if (authResult) return authResult
-
+export async function GET(request: NextRequestWithUser) {
+  // Rota pública para ver as avaliações de um usuário específico
   try {
     const { searchParams } = new URL(request.url)
     const userId = searchParams.get("user_id")
 
-    let query = supabaseAdmin
+    if (!userId) {
+      return NextResponse.json({ error: "O parâmetro 'user_id' é obrigatório." }, { status: 400 })
+    }
+
+    const { data: reviews, error } = await supabaseAdmin
       .from("reviews")
-      .select(`
-        *,
-        reviewer:users!reviews_reviewer_id_fkey(id, name, avatar_url),
-        reviewed:users!reviews_reviewed_id_fkey(id, name, avatar_url),
-        contract:contracts(project:projects(title))
-      `)
+      .select(`*, reviewer:users!reviews_reviewer_id_fkey(id, name, avatar_url)`)
+      .eq("reviewed_id", userId)
       .order("created_at", { ascending: false })
 
-    if (userId) {
-      query = query.eq("reviewed_id", userId)
-    }
-
-    const { data: reviews, error } = await query
-
-    if (error) {
-      return NextResponse.json({ error: "Failed to fetch reviews" }, { status: 500 })
-    }
+    if (error) throw error
 
     return NextResponse.json({ data: reviews })
-  } catch (error) {
-    console.error("Reviews fetch error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } catch (error: any) {
+    console.error("Reviews GET error:", error)
+    return NextResponse.json({ error: "Erro interno do servidor." }, { status: 500 })
   }
 }
 
-export async function POST(request: NextRequest) {
-  const authResult = await authMiddleware(request)
+const createReviewSchema = z.object({
+  contract_id: z.string().uuid(),
+  reviewed_id: z.string().uuid(),
+  rating: z.number().int().min(1).max(5),
+  comment: z.string().min(10).optional(),
+})
+
+export async function POST(request: NextRequestWithUser) {
+  const authResult = await requireUserType(["company", "freelancer"])(request)
   if (authResult) return authResult
 
   try {
+    const user = request.user
     const body = await request.json()
-    const user = (request as any).user
+    const validation = createReviewSchema.safeParse(body)
 
-    const { contract_id, reviewed_id, rating, comment } = body
-
-    // Validação básica
-    if (!contract_id || !reviewed_id || !rating) {
-      return NextResponse.json({ error: "Contract ID, reviewed user ID, and rating are required" }, { status: 400 })
+    if (!validation.success) {
+      return NextResponse.json({ error: "Dados inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 })
     }
 
-    if (rating < 1 || rating > 5) {
-      return NextResponse.json({ error: "Rating must be between 1 and 5" }, { status: 400 })
-    }
+    const { contract_id, reviewed_id, rating, comment } = validation.data
 
-    // Verificar se o contrato existe e está completo
+    // Verificar se o contrato existe, está completo e se o usuário é parte dele
     const { data: contract, error: contractError } = await supabaseAdmin
       .from("contracts")
-      .select("*")
+      .select("is_completed, company_id, freelancer_id")
       .eq("id", contract_id)
-      .eq("is_completed", true)
       .single()
 
     if (contractError || !contract) {
-      return NextResponse.json({ error: "Contract not found or not completed" }, { status: 404 })
+      return NextResponse.json({ error: "Contrato não encontrado." }, { status: 404 })
     }
 
-    // Verificar se o usuário faz parte do contrato
+    if (!contract.is_completed) {
+      return NextResponse.json({ error: "Só é possível avaliar após a conclusão do contrato." }, { status: 403 })
+    }
+
     const isParticipant = contract.company_id === user.id || contract.freelancer_id === user.id
-
     if (!isParticipant) {
-      return NextResponse.json({ error: "Access denied" }, { status: 403 })
+      return NextResponse.json({ error: "Você não faz parte deste contrato." }, { status: 403 })
     }
 
-    // Verificar se já existe uma avaliação do usuário para este contrato
+    // Verificar se o usuário já avaliou este contrato
     const { data: existingReview } = await supabaseAdmin
       .from("reviews")
       .select("id")
@@ -84,10 +80,11 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (existingReview) {
-      return NextResponse.json({ error: "You have already reviewed this contract" }, { status: 409 })
+      return NextResponse.json({ error: "Você já avaliou este contrato." }, { status: 409 })
     }
 
-    const { data: review, error } = await supabaseAdmin
+    // Inserir a avaliação
+    const { data: newReview, error: insertError } = await supabaseAdmin
       .from("reviews")
       .insert({
         contract_id,
@@ -96,27 +93,14 @@ export async function POST(request: NextRequest) {
         rating,
         comment,
       })
-      .select(`
-        *,
-        reviewer:users!reviews_reviewer_id_fkey(id, name, avatar_url),
-        reviewed:users!reviews_reviewed_id_fkey(id, name, avatar_url)
-      `)
+      .select()
       .single()
 
-    if (error) {
-      console.error("Review creation error:", error)
-      return NextResponse.json({ error: "Failed to create review" }, { status: 500 })
-    }
+    if (insertError) throw insertError
 
-    return NextResponse.json(
-      {
-        data: review,
-        message: "Review submitted successfully",
-      },
-      { status: 201 },
-    )
-  } catch (error) {
+    return NextResponse.json({ data: newReview, message: "Avaliação enviada com sucesso." }, { status: 201 })
+  } catch (error: any) {
     console.error("Review creation error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return NextResponse.json({ error: error.message || "Erro interno do servidor." }, { status: 500 })
   }
 }

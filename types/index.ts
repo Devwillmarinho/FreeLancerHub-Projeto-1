@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server"
+
 export type UserType = "admin" | "company" | "freelancer"
 export type ProjectStatus = "draft" | "open" | "in_progress" | "completed" | "cancelled"
 export type ProposalStatus = "pending" | "accepted" | "rejected"
@@ -40,7 +42,7 @@ export interface Proposal {
   freelancer_id: string
   message: string
   proposed_budget: number
-  estimated_duration?: number
+  estimated_duration?: string // Alterado para string para ser consistente com a validação (Zod)
   status: ProposalStatus
   created_at: string
   updated_at: string
@@ -96,4 +98,12 @@ export interface ApiResponse<T> {
   data?: T
   error?: string
   message?: string
+}
+
+/**
+ * Estende a interface NextRequest para incluir o objeto `user`
+ * que é adicionado pelo middleware de autenticação.
+ */
+export interface NextRequestWithUser extends NextRequest {
+  user: User
 }
