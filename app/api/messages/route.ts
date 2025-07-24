@@ -1,104 +1,155 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { formidable } from "formidable";
-import fs from "node:fs/promises";
-import path from "node:path";
-import prisma from "@/lib/prisma"; // Assumindo que seu Prisma Client está em /lib
-import { supabase } from "@/lib/supabaseClient"; // Assumindo que seu Supabase Client está em /lib
+import { NextResponse } from "next/server"
+import { z } from "zod"
+import { formidable } from "formidable"
+import fs from "node:fs/promises"
+import { supabaseAdmin, supabase } from "@/lib/supabase" // Usando o client do Supabase
+import { authMiddleware } from "@/middleware/auth"
+import { NextRequestWithUser } from "@/types"
 
-// Helper para obter o ID do usuário a partir do token (adapte conforme sua implementação de autenticação)
-import { getUserIdFromRequest } from "@/lib/auth-helpers";
+// Função para processar formulários com arquivos
+async function parseFormData(req: NextRequestWithUser) {
+  return new Promise<[formidable.Fields, formidable.Files]>((resolve, reject) => {
+    const form = formidable({})
+    form.parse(req as any, (err, fields, files) => {
+      if (err) {
+        reject(err)
+      }
+      resolve([fields, files])
+    })
+  })
+}
 
-// IMPORTANTE: Desativa o bodyParser padrão do Next.js para esta rota específica.
-// Isso é necessário para que o formidable consiga processar o fluxo do formulário.
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
+// Schema de validação com Zod
+const messageSchema = z.object({
+  project_id: z.string().uuid("ID do projeto inválido."),
+  content: z.string().min(1, "O conteúdo da mensagem não pode estar vazio."),
+})
 
-export async function POST(req: NextRequest) {
+// Função para LER mensagens de um projeto
+export async function GET(request: NextRequestWithUser) {
+  const authResult = await authMiddleware(request)
+  if (authResult) return authResult
+
   try {
-    // 1. Autenticar o usuário
-    const senderId = await getUserIdFromRequest(req);
-    if (!senderId) {
-      return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
+    const user = request.user
+    const { searchParams } = new URL(request.url)
+    const projectId = searchParams.get("project_id")
+
+    if (!projectId) {
+      return NextResponse.json({ error: "O ID do projeto é obrigatório." }, { status: 400 })
     }
 
-    // 2. Processar o formulário com 'formidable'
-    const form = formidable();
-    const [fields, files] = await form.parse(req as any);
+    // Verificar se o usuário faz parte do projeto
+    const { data: project, error: projectError } = await supabaseAdmin
+      .from("projects")
+      .select("company_id, freelancer_id")
+      .eq("id", projectId)
+      .single()
 
-    // Extrair os campos de texto do formulário
-    const projectId = fields.projectId?.[0];
-    const content = fields.content?.[0];
-
-    if (!projectId || !content) {
-      return NextResponse.json(
-        { error: "ID do projeto e conteúdo da mensagem são obrigatórios." },
-        { status: 400 }
-      );
+    if (projectError || !project) {
+      return NextResponse.json({ error: "Projeto não encontrado." }, { status: 404 })
     }
 
-    // 3. Lidar com o upload do arquivo, se existir
-    let fileUrl: string | null = null;
-    let fileName: string | null = null;
-    const uploadedFile = files.attachment?.[0];
+    const isParticipant = project.company_id === user.id || project.freelancer_id === user.id || user.user_type === "admin"
+    if (!isParticipant) {
+      return NextResponse.json({ error: "Acesso negado." }, { status: 403 })
+    }
+
+    // Buscar mensagens
+    const { data: messages, error: messagesError } = await supabaseAdmin
+      .from("messages")
+      .select(`*, sender:users(id, name, avatar_url, user_type)`)
+      .eq("project_id", projectId)
+      .order("created_at", { ascending: true })
+
+    if (messagesError) throw messagesError
+
+    return NextResponse.json({ data: messages })
+  } catch (error: any) {
+    console.error("API Message GET Error:", error)
+    return NextResponse.json({ error: error.message || "Erro interno do servidor." }, { status: 500 })
+  }
+}
+
+// Função para ENVIAR mensagem
+export async function POST(request: NextRequestWithUser) {
+  const authResult = await authMiddleware(request)
+  if (authResult) return authResult
+
+  try {
+    const user = request.user
+    const [fields, files] = await parseFormData(request)
+
+    const validation = messageSchema.safeParse({
+      project_id: fields.project_id?.[0],
+      content: fields.content?.[0],
+    })
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Dados inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 })
+    }
+
+    const { project_id, content } = validation.data
+
+    // Verificar se o usuário faz parte do projeto
+    const { data: project, error: projectError } = await supabaseAdmin
+      .from("projects")
+      .select("company_id, freelancer_id")
+      .eq("id", project_id)
+      .single()
+
+    if (projectError || !project) {
+      return NextResponse.json({ error: "Projeto não encontrado." }, { status: 404 })
+    }
+
+    const isParticipant = project.company_id === user.id || project.freelancer_id === user.id || user.user_type === "admin"
+    if (!isParticipant) {
+      return NextResponse.json({ error: "Acesso negado. Você não faz parte deste projeto." }, { status: 403 })
+    }
+
+    // Lógica de upload de arquivo
+    let fileUrl: string | undefined = undefined
+    let fileName: string | undefined = undefined
+    const uploadedFile = files.attachment?.[0]
 
     if (uploadedFile) {
-      // Ler o arquivo do caminho temporário
-      const fileContent = await fs.readFile(uploadedFile.filepath);
-      const uniqueFileName = `${Date.now()}-${uploadedFile.originalFilename}`;
+      const fileContent = await fs.readFile(uploadedFile.filepath)
+      const uniqueFileName = `${Date.now()}-${uploadedFile.originalFilename}`
 
-      // Fazer o upload para o Supabase Storage
-      // Certifique-se de ter um bucket chamado 'project-files' no seu Supabase.
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from("project-files") // Nome do seu bucket
+        .from("project-files")
         .upload(uniqueFileName, fileContent, {
           contentType: uploadedFile.mimetype || "application/octet-stream",
           upsert: false,
-        });
+        })
 
-      if (uploadError) {
-        console.error("Supabase Upload Error:", uploadError);
-        throw new Error("Falha ao fazer upload do arquivo.");
-      }
+      if (uploadError) throw new Error("Falha ao fazer upload do arquivo.")
 
-      // Obter a URL pública do arquivo
-      const { data: publicUrlData } = supabase.storage
-        .from("project-files")
-        .getPublicUrl(uploadData.path);
+      const { data: publicUrlData } = supabase.storage.from("project-files").getPublicUrl(uploadData.path)
+      fileUrl = publicUrlData.publicUrl
+      fileName = uploadedFile.originalFilename
 
-      fileUrl = publicUrlData.publicUrl;
-      fileName = uploadedFile.originalFilename;
-
-      // Opcional: remover o arquivo temporário
-      await fs.unlink(uploadedFile.filepath);
+      await fs.unlink(uploadedFile.filepath)
     }
 
-    // 4. Salvar a mensagem no banco de dados com Prisma
-     const newMessage = await prisma.message.create({
-      data: {
-        project_id: projectId,
-        sender_id: senderId,
+    // Inserir mensagem no banco
+    const { data: newMessage, error: insertError } = await supabaseAdmin
+      .from("messages")
+      .insert({
+        project_id,
+        sender_id: user.id,
         content,
         file_url: fileUrl,
         file_name: fileName,
-      },
-      include: {
-        // Incluir dados do remetente para exibir no frontend
-        sender: {
-          select: { name: true, avatar_url: true },
-        },
-      },
-    });
+      })
+      .select("*, sender:users(id, name, avatar_url)")
+      .single()
 
-    return NextResponse.json(newMessage, { status: 201 });
+    if (insertError) throw insertError
+
+    return NextResponse.json({ data: newMessage, message: "Mensagem enviada." }, { status: 201 })
   } catch (error: any) {
-    console.error("API Message POST Error:", error);
-    return NextResponse.json(
-      { error: error.message || "Ocorreu um erro interno no servidor." },
-      { status: 500 }
-    );
+    console.error("API Message POST Error:", error)
+    return NextResponse.json({ error: error.message || "Erro interno do servidor." }, { status: 500 })
   }
 }

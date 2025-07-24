@@ -6,15 +6,30 @@ import { type NextRequest } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import * as AuthMiddleware from "@/middleware/auth"
 
+// Mocks mais robustos e específicos por tabela
+const mockProposalsTable = {
+  select: jest.fn(),
+  insert: jest.fn(),
+}
+const mockProjectsTable = {
+  select: jest.fn(),
+}
+
 // Mock das dependências
 jest.mock("@/lib/supabase", () => ({
   supabaseAdmin: {
-    from: jest.fn().mockReturnThis(),
-    select: jest.fn().mockReturnThis(),
-    insert: jest.fn().mockReturnThis(),
-    eq: jest.fn().mockReturnThis(),
-    order: jest.fn().mockReturnThis(),
-    single: jest.fn(),
+    from: jest.fn((tableName: string) => {
+      if (tableName === "proposals") {
+        return mockProposalsTable
+      }
+      if (tableName === "projects") {
+        return mockProjectsTable
+      }
+      return {
+        select: jest.fn().mockReturnThis(),
+        insert: jest.fn().mockReturnThis(),
+      }
+    }),
   },
 }))
 
@@ -30,6 +45,8 @@ const mockRequireUserType = AuthMiddleware.requireUserType as jest.Mock
 describe("API /api/proposals", () => {
   beforeEach(() => {
     jest.clearAllMocks()
+    Object.values(mockProposalsTable).forEach((mockFn) => mockFn.mockClear())
+    Object.values(mockProjectsTable).forEach((mockFn) => mockFn.mockClear())
   })
 
   describe("POST /api/proposals", () => {
@@ -48,21 +65,30 @@ describe("API /api/proposals", () => {
       })
 
       // Simula que o projeto existe e está aberto
-      ;(supabaseAdmin.from("projects").select().eq().eq().single as jest.Mock).mockResolvedValueOnce({
-        data: { id: "project-id-1", status: "open" },
-        error: null,
+      mockProjectsTable.select.mockReturnValue({
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { id: "project-id-1", status: "open" },
+          error: null,
+        }),
       })
 
       // Simula que não há proposta existente
-      ;(supabaseAdmin.from("proposals").select().eq().eq().single as jest.Mock).mockResolvedValueOnce({
-        data: null,
-        error: null,
+      mockProposalsTable.select.mockReturnValue({
+        eq: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: null,
+          error: null,
+        }),
       })
 
       // Simula a inserção bem-sucedida
-      ;(supabaseAdmin.from("proposals").insert().select().single as jest.Mock).mockResolvedValueOnce({
-        data: { id: "new-proposal-id", ...proposalData, freelancer_id: mockUser.id },
-        error: null,
+      mockProposalsTable.insert.mockReturnValue({
+        select: jest.fn().mockReturnThis(),
+        single: jest.fn().mockResolvedValue({
+          data: { id: "new-proposal-id", ...proposalData, freelancer_id: mockUser.id },
+          error: null,
+        }),
       })
 
       const req = {
@@ -111,8 +137,10 @@ describe("API /api/proposals", () => {
         return null
       })
 
-      const eqMock = jest.fn().mockResolvedValueOnce({ data: mockProposals, error: null })
-      ;(supabaseAdmin.from("proposals").select().order as jest.Mock).mockReturnValueOnce({ eq: eqMock })
+      mockProposalsTable.select.mockReturnValue({
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockResolvedValue({ data: mockProposals, error: null }),
+      })
 
       const req = { url: "http://localhost/api/proposals" } as NextRequest
       const response = await GET(req)
@@ -120,7 +148,7 @@ describe("API /api/proposals", () => {
 
       expect(response.status).toBe(200)
       expect(body.data).toEqual(mockProposals)
-      expect(eqMock).toHaveBeenCalledWith("freelancer_id", mockUser.id)
+      expect(mockProposalsTable.select().eq).toHaveBeenCalledWith("freelancer_id", mockUser.id)
     })
 
     test("deve buscar as propostas de um projeto de uma empresa", async () => {
@@ -132,9 +160,11 @@ describe("API /api/proposals", () => {
         return null
       })
 
-      const projectEqMock = jest.fn().mockResolvedValueOnce({ data: mockProposals, error: null })
-      const companyEqMock = jest.fn().mockReturnValueOnce({ eq: projectEqMock })
-      ;(supabaseAdmin.from("proposals").select().order as jest.Mock).mockReturnValueOnce({ eq: companyEqMock })
+      mockProposalsTable.select.mockReturnValue({
+        order: jest.fn().mockReturnThis(),
+        eq: jest.fn().mockReturnThis(),
+      })
+      ;(mockProposalsTable.select().eq as jest.Mock).mockResolvedValue({ data: mockProposals, error: null })
 
       const req = { url: "http://localhost/api/proposals?project_id=project-1" } as NextRequest
       const response = await GET(req)
@@ -142,8 +172,8 @@ describe("API /api/proposals", () => {
 
       expect(response.status).toBe(200)
       expect(body.data).toEqual(mockProposals)
-      expect(companyEqMock).toHaveBeenCalledWith("project.company_id", mockUser.id)
-      expect(projectEqMock).toHaveBeenCalledWith("project_id", "project-1")
+      expect(mockProposalsTable.select().eq).toHaveBeenCalledWith("project.company_id", mockUser.id)
+      expect(mockProposalsTable.select().eq).toHaveBeenCalledWith("project_id", "project-1")
     })
   })
 })

@@ -1,8 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import { authMiddleware, requireUserType } from "@/middleware/auth"
+import { z } from "zod"
+import { NextRequestWithUser } from "@/types"
 
-export async function GET(request: NextRequest) {
+export async function GET(request: NextRequestWithUser) {
   const authResult = await authMiddleware(request)
   if (authResult) return authResult
 
@@ -11,7 +13,7 @@ export async function GET(request: NextRequest) {
     const projectId = searchParams.get("project_id")
     const status = searchParams.get("status")
 
-    const user = (request as any).user
+    const user = request.user
 
     let query = supabaseAdmin
       .from("proposals")
@@ -51,28 +53,27 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+const createProposalSchema = z.object({
+  project_id: z.string().uuid({ message: "ID do projeto inválido." }),
+  message: z.string().min(10, { message: "A mensagem deve ter pelo menos 10 caracteres." }),
+  proposed_budget: z.number().positive({ message: "O orçamento deve ser um número positivo." }),
+  estimated_duration: z.string().optional(),
+});
+
+export async function POST(request: NextRequestWithUser) {
   const authResult = await requireUserType(["freelancer"])(request)
   if (authResult) return authResult
 
   try {
     const body = await request.json()
-    const user = (request as any).user
+    const validation = createProposalSchema.safeParse(body);
 
-    const { project_id, message, proposed_budget, estimated_duration } = body
-
-    // Validação básica
-    if (!project_id || !message || !proposed_budget) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
+    if (!validation.success) {
+      return NextResponse.json({ error: "Dados inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 });
     }
 
-    if (message.length < 10) {
-      return NextResponse.json({ error: "Message must be at least 10 characters" }, { status: 400 })
-    }
-
-    if (proposed_budget <= 0) {
-      return NextResponse.json({ error: "Budget must be a positive number" }, { status: 400 })
-    }
+    const { project_id, message, proposed_budget, estimated_duration } = validation.data;
+    const user = request.user
 
     // Verificar se o projeto existe e está aberto
     const { data: project, error: projectError } = await supabaseAdmin
