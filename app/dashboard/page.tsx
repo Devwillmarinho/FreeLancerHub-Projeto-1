@@ -21,14 +21,18 @@ export default async function DashboardPage() {
   const cookieStore = cookies()
   const supabase = createServerComponentClient({ cookies: () => cookieStore })
 
-  const { data: { session } } = await supabase.auth.getSession()
+  // Usar getUser() é mais seguro pois valida a sessão com o servidor da Supabase.
+  const { data: { user } } = await supabase.auth.getUser()
 
-  // Se não houver sessão, o usuário não está logado. Redireciona para a página de login.
-  if (!session) {
+  // Se não houver usuário, redireciona para o login.
+  if (!user) {
     redirect('/auth/login')
   }
 
-  const userId = session.user.id
+  // Precisamos da sessão para obter o access_token para as chamadas de API no cliente.
+  const { data: { session } } = await supabase.auth.getSession();
+
+  const userId = user.id
   let userProfile: FreelancerProfile | CompanyProfile | null = null;
   let userType: 'freelancer' | 'company' | null = null;
 
@@ -53,6 +57,11 @@ export default async function DashboardPage() {
     return <div>Perfil não encontrado. Por favor, contate o suporte.</div>
   }
 
+  // Não passe o objeto `session` inteiro. Passe apenas o que é necessário.
   // Passamos os dados buscados no servidor como props para o componente de cliente.
-  return <DashboardClientPage session={session} profile={userProfile} userType={userType} />
+  return <DashboardClientPage 
+            accessToken={session?.access_token} 
+            userEmail={user.email} 
+            profile={userProfile} 
+            userType={userType} />
 }

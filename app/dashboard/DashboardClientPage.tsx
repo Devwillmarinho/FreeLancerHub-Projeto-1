@@ -83,7 +83,8 @@ interface DashboardContract {
 
 // Props que o componente receberá do "porteiro" (page.tsx)
 interface DashboardClientPageProps {
-  session: Session;
+  accessToken: string | undefined;
+  userEmail: string | undefined;
   profile: {
     id: string;
     full_name?: string;
@@ -93,7 +94,7 @@ interface DashboardClientPageProps {
   userType: 'freelancer' | 'company' | null;
 }
 
-export default function DashboardClientPage({ session, profile, userType }: DashboardClientPageProps) {
+export default function DashboardClientPage({ accessToken, userEmail, profile, userType }: DashboardClientPageProps) {
   const [supabase] = useState(() => createClientComponentClient());
   const router = useRouter();
   const { toast } = useToast();
@@ -113,6 +114,7 @@ export default function DashboardClientPage({ session, profile, userType }: Dash
   const [proposals, setProposals] = useState<DashboardProposal[]>([]);
   const [isLoadingProposals, setIsLoadingProposals] = useState(true);
   const [contracts, setContracts] = useState<DashboardContract[]>([]);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isLoadingContracts, setIsLoadingContracts] = useState(true);
 
   const stats = [
@@ -154,78 +156,139 @@ export default function DashboardClientPage({ session, profile, userType }: Dash
   // Os useEffects para buscar projetos, propostas, etc., podem ser mantidos.
   useEffect(() => {
     async function fetchProjects() {
+      if (!accessToken) {
+        setIsLoadingProjects(false);
+        return;
+      }
       try {
-        const response = await fetch("/api/projects");
+        const response = await fetch("/api/projects", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
         if (!response.ok) {
           throw new Error("Falha ao buscar projetos");
         }
         const data = await response.json();
         setProjects(data.data || []);
       } catch (error) {
-        console.error(error);
+        console.error("Falha ao buscar projetos:", error);
       } finally {
         setIsLoadingProjects(false);
       }
     }
-    if (session) { // Só busca os projetos se a sessão existir
-      fetchProjects();
-    }
-  }, [session]);
+    fetchProjects();
+  }, [accessToken]);
 
   useEffect(() => {
     async function fetchProposals() {
-      if (!session) return;
+      if (!accessToken) {
+        setIsLoadingProposals(false);
+        return;
+      }
       try {
-        const response = await fetch("/api/proposals");
+        const response = await fetch("/api/proposals", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
         if (!response.ok) throw new Error("Falha ao buscar propostas");
         const data = await response.json();
         setProposals(data.data || []);
       } catch (error) {
-        console.error(error);
+        console.error("Falha ao buscar propostas:", error);
       } finally {
         setIsLoadingProposals(false);
       }
     }
     fetchProposals();
-  }, [session]);
+  }, [accessToken]);
 
   useEffect(() => {
     async function fetchContracts() {
-      if (!session) return;
+      if (!accessToken) {
+        setIsLoadingContracts(false);
+        return;
+      }
       try {
-        const response = await fetch("/api/contracts");
+        const response = await fetch("/api/contracts", {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
         if (!response.ok) throw new Error("Falha ao buscar contratos");
         const data = await response.json();
         setContracts(data.data || []);
       } catch (error) {
-        console.error(error);
+        console.error("Falha ao buscar contratos:", error);
       } finally {
         setIsLoadingContracts(false);
       }
     }
     fetchContracts();
-  }, [session]);
+  }, [accessToken]);
 
   const handleCreateProject = async () => {
+    if (!accessToken) {
+      toast({
+        title: "Não autenticado",
+        description: "Você precisa estar logado para criar um projeto.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Defensive check: Ensure user type is correct before making an API call.
+    if (userType !== 'company') {
+      toast({
+        title: "Ação não permitida",
+        description: "Apenas usuários do tipo 'empresa' podem criar projetos.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsCreatingProject(true);
     try {
       const response = await fetch("/api/projects", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({
           title: newProject.title,
           description: newProject.description,
           budget: Number(newProject.budget),
-          required_skills: newProject.skills.split(",").map((s) => s.trim()),
+          // Melhoria: Filtra strings vazias caso o input esteja em branco ou tenha vírgulas extras.
+          required_skills: newProject.skills.split(",").map((s) => s.trim()).filter(Boolean),
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Falha ao criar projeto.");
+        // Lógica de erro aprimorada para dar mais detalhes.
+        let errorMessage = `Falha na API com status ${response.status}.`;
+        try {
+          const errorData = await response.json();
+          // Lida com erros de validação estruturados da sua API
+          if (errorData.errors && typeof errorData.errors === 'object') {
+            errorMessage = Object.values(errorData.errors).flat().join(' ');
+          } else {
+            // Lida com outros formatos de erro
+            errorMessage = errorData.message || errorData.error || JSON.stringify(errorData);
+          }
+        } catch (e) {
+          // Se a resposta de erro não for JSON, usa o texto do status HTTP.
+          errorMessage = `Falha na API com status ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
       }
 
       const createdProject = await response.json();
-      setProjects([createdProject.data, ...projects]);
+      // Adicionado tratamento para diferentes formatos de resposta da API
+      const newProjectData = createdProject.data || createdProject;
+      setProjects([newProjectData, ...projects]);
+
       setShowNewProjectDialog(false);
       toast({ title: "Sucesso!", description: "Seu projeto foi criado." });
     } catch (error: any) {
@@ -235,6 +298,8 @@ export default function DashboardClientPage({ session, profile, userType }: Dash
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setIsCreatingProject(false);
     }
   };
 
@@ -309,7 +374,7 @@ export default function DashboardClientPage({ session, profile, userType }: Dash
                       </div>
                       <div>
                         <h3 className="font-semibold">{profile?.full_name || profile?.company_name}</h3>
-                        <p className="text-sm text-gray-600">{session?.user.email}</p>
+                        <p className="text-sm text-gray-600">{userEmail}</p>
                         <Badge variant="secondary" className="capitalize mt-1">{userType}</Badge>
                       </div>
                     </div>
@@ -405,7 +470,10 @@ export default function DashboardClientPage({ session, profile, userType }: Dash
                       </div>
                     </div>
                   </div>
-                  <Button onClick={handleCreateProject}>Criar Projeto</Button>
+                  <Button onClick={handleCreateProject} disabled={isCreatingProject}>
+                    {isCreatingProject && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {isCreatingProject ? "Criando..." : "Criar Projeto"}
+                  </Button>
                 </DialogContent>
               </Dialog>
             )}
