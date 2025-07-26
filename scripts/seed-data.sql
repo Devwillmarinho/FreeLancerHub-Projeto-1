@@ -1,114 +1,78 @@
 -- Dados de exemplo para o sistema
 
--- Inserir usuários de exemplo
-INSERT INTO users (email, password_hash, name, user_type, bio, company_name) VALUES
-('admin@freelance.com', '$2b$10$rOzJqQjQjQjQjQjQjQjQjO', 'Admin Sistema', 'admin', 'Administrador da plataforma', NULL),
-('empresa1@test.com', '$2b$10$rOzJqQjQjQjQjQjQjQjQjO', 'João Silva', 'company', 'CEO da empresa', 'Tech Solutions LTDA'),
-('empresa2@test.com', '$2b$10$rOzJqQjQjQjQjQjQjQjQjO', 'Maria Santos', 'company', 'Diretora de TI', 'Digital Innovations'),
-('freelancer1@test.com', '$2b$10$rOzJqQjQjQjQjQjQjQjQjO', 'Carlos Developer', 'freelancer', 'Desenvolvedor Full Stack com 5 anos de experiência', NULL),
-('freelancer2@test.com', '$2b$10$rOzJqQjQjQjQjQjQjQjQjO', 'Ana Designer', 'freelancer', 'Designer UX/UI especializada em interfaces modernas', NULL);
+-- NOTA: Este script assume que você já criou os seguintes usuários
+-- através da sua aplicação ou do painel do Supabase:
+-- - 'empresa1@test.com' (type: company)
+-- - 'empresa2@test.com' (type: company)
+-- - 'freelancer1@test.com' (type: freelancer)
+-- - 'freelancer2@test.com' (type: freelancer)
+-- Este script irá falhar se os usuários não existirem em `auth.users` e `public.profiles`.
 
--- Atualizar skills dos freelancers
-UPDATE users SET skills = ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL'] 
-WHERE email = 'freelancer1@test.com';
+DO $$
+DECLARE
+    company1_id uuid;
+    company2_id uuid;
+    freelancer1_id uuid;
+    freelancer2_id uuid;
+    project1_id uuid;
+    project2_id uuid;
+    project3_id uuid;
+    contract_id uuid;
+BEGIN
+    -- Obter IDs dos usuários a partir da tabela de perfis
+    SELECT id INTO company1_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'empresa1@test.com');
+    SELECT id INTO company2_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'empresa2@test.com');
+    SELECT id INTO freelancer1_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'freelancer1@test.com');
+    SELECT id INTO freelancer2_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'freelancer2@test.com');
 
-UPDATE users SET skills = ARRAY['UI/UX Design', 'Figma', 'Adobe Creative Suite', 'Prototyping'] 
-WHERE email = 'freelancer2@test.com';
+    -- Verificar se os usuários foram encontrados
+    IF company1_id IS NULL OR company2_id IS NULL OR freelancer1_id IS NULL OR freelancer2_id IS NULL THEN
+        RAISE EXCEPTION 'Um ou mais usuários de teste não foram encontrados. Crie-os primeiro.';
+    END IF;
 
--- Inserir projetos de exemplo
-INSERT INTO projects (title, description, budget, deadline, status, required_skills, company_id) 
-SELECT 
-    'Desenvolvimento de E-commerce',
-    'Preciso de um e-commerce completo com carrinho de compras, pagamento e área administrativa.',
-    15000.00,
-    CURRENT_DATE + INTERVAL '60 days',
-    'open',
-    ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL'],
-    id
-FROM users WHERE email = 'empresa1@test.com';
+    -- Atualizar skills dos freelancers
+    UPDATE public.profiles SET skills = ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL'] 
+    WHERE id = freelancer1_id;
 
-INSERT INTO projects (title, description, budget, deadline, status, required_skills, company_id) 
-SELECT 
-    'Redesign de Interface Mobile',
-    'Redesign completo do aplicativo mobile com foco em UX/UI moderno.',
-    8000.00,
-    CURRENT_DATE + INTERVAL '30 days',
-    'open',
-    ARRAY['UI/UX Design', 'Figma', 'Mobile Design'],
-    id
-FROM users WHERE email = 'empresa2@test.com';
+    UPDATE public.profiles SET skills = ARRAY['UI/UX Design', 'Figma', 'Adobe Creative Suite', 'Prototyping'] 
+    WHERE id = freelancer2_id;
 
-INSERT INTO projects (title, description, budget, deadline, status, required_skills, company_id) 
-SELECT 
-    'Sistema de Gestão Interna',
-    'Sistema web para gestão de funcionários e processos internos.',
-    25000.00,
-    CURRENT_DATE + INTERVAL '90 days',
-    'draft',
-    ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL', 'Docker'],
-    id
-FROM users WHERE email = 'empresa1@test.com';
+    -- Inserir projetos de exemplo
+    INSERT INTO public.projects (title, description, budget, deadline, status, required_skills, company_id) VALUES
+    ('Desenvolvimento de E-commerce', 'Preciso de um e-commerce completo com carrinho de compras, pagamento e área administrativa.', 15000.00, CURRENT_DATE + INTERVAL '60 days', 'open', ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL'], company1_id)
+    RETURNING id INTO project1_id;
 
--- Inserir propostas de exemplo
-INSERT INTO proposals (project_id, freelancer_id, message, proposed_budget, estimated_duration, status)
-SELECT 
-    p.id,
-    f.id,
-    'Tenho experiência sólida em desenvolvimento de e-commerce. Posso entregar um sistema completo com todas as funcionalidades solicitadas.',
-    14000.00,
-    45,
-    'pending'
-FROM projects p, users f 
-WHERE p.title = 'Desenvolvimento de E-commerce' 
-AND f.email = 'freelancer1@test.com';
+    INSERT INTO public.projects (title, description, budget, deadline, status, required_skills, company_id) VALUES
+    ('Redesign de Interface Mobile', 'Redesign completo do aplicativo mobile com foco em UX/UI moderno.', 8000.00, CURRENT_DATE + INTERVAL '30 days', 'open', ARRAY['UI/UX Design', 'Figma', 'Mobile Design'], company2_id)
+    RETURNING id INTO project2_id;
 
-INSERT INTO proposals (project_id, freelancer_id, message, proposed_budget, estimated_duration, status)
-SELECT 
-    p.id,
-    f.id,
-    'Especialista em design mobile com portfolio robusto. Posso criar uma interface moderna e intuitiva.',
-    7500.00,
-    25,
-    'accepted'
-FROM projects p, users f 
-WHERE p.title = 'Redesign de Interface Mobile' 
-AND f.email = 'freelancer2@test.com';
+    INSERT INTO public.projects (title, description, budget, deadline, status, required_skills, company_id) VALUES
+    ('Sistema de Gestão Interna', 'Sistema web para gestão de funcionários e processos internos.', 25000.00, CURRENT_DATE + INTERVAL '90 days', 'draft', ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL', 'Docker'], company1_id)
+    RETURNING id INTO project3_id;
 
--- Atualizar projeto com freelancer aceito
-UPDATE projects 
-SET freelancer_id = (SELECT id FROM users WHERE email = 'freelancer2@test.com'),
-    status = 'in_progress'
-WHERE title = 'Redesign de Interface Mobile';
+    -- Inserir propostas de exemplo
+    INSERT INTO public.proposals (project_id, freelancer_id, message, proposed_budget, estimated_duration, status) VALUES
+    (project1_id, freelancer1_id, 'Tenho experiência sólida em desenvolvimento de e-commerce. Posso entregar um sistema completo com todas as funcionalidades solicitadas.', 14000.00, 45, 'pending');
 
--- Inserir contrato de exemplo
-INSERT INTO contracts (project_id, company_id, freelancer_id, budget, start_date, terms)
-SELECT 
-    p.id,
-    c.id,
-    f.id,
-    7500.00,
-    CURRENT_DATE,
-    'Contrato para redesign de interface mobile. Prazo de 25 dias. Pagamento em 2 parcelas: 50% no início e 50% na entrega.'
-FROM projects p, users c, users f
-WHERE p.title = 'Redesign de Interface Mobile'
-AND c.email = 'empresa2@test.com'
-AND f.email = 'freelancer2@test.com';
+    INSERT INTO public.proposals (project_id, freelancer_id, message, proposed_budget, estimated_duration, status) VALUES
+    (project2_id, freelancer2_id, 'Especialista em design mobile com portfolio robusto. Posso criar uma interface moderna e intuitiva.', 7500.00, 25, 'accepted');
 
--- Inserir mensagens de exemplo
-INSERT INTO messages (project_id, sender_id, content)
-SELECT 
-    p.id,
-    c.id,
-    'Olá! Gostei da sua proposta. Podemos conversar sobre os detalhes do projeto?'
-FROM projects p, users c
-WHERE p.title = 'Redesign de Interface Mobile'
-AND c.email = 'empresa2@test.com';
+    -- Atualizar projeto com freelancer aceito
+    UPDATE public.projects 
+    SET freelancer_id = freelancer2_id,
+        status = 'in_progress'
+    WHERE id = project2_id;
 
-INSERT INTO messages (project_id, sender_id, content)
-SELECT 
-    p.id,
-    f.id,
-    'Claro! Estou disponível para uma reunião. Quando seria melhor para vocês?'
-FROM projects p, users f
-WHERE p.title = 'Redesign de Interface Mobile'
-AND f.email = 'freelancer2@test.com';
+    -- Inserir contrato de exemplo
+    INSERT INTO public.contracts (project_id, company_id, freelancer_id, budget, start_date, terms) VALUES
+    (project2_id, company2_id, freelancer2_id, 7500.00, CURRENT_DATE, 'Contrato para redesign de interface mobile. Prazo de 25 dias. Pagamento em 2 parcelas: 50% no início e 50% na entrega.')
+    RETURNING id INTO contract_id;
+
+    -- Inserir mensagens de exemplo
+    INSERT INTO public.messages (project_id, sender_id, content) VALUES
+    (project2_id, company2_id, 'Olá! Gostei da sua proposta. Podemos conversar sobre os detalhes do projeto?');
+
+    INSERT INTO public.messages (project_id, sender_id, content) VALUES
+    (project2_id, freelancer2_id, 'Claro! Estou disponível para uma reunião. Quando seria melhor para vocês?');
+
+END $$;

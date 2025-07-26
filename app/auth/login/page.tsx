@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,7 +24,7 @@ import {
   ArrowLeft,
   Users,
 } from "lucide-react"
-import { createClient } from "@/lib/supabase/client";
+import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -37,14 +37,22 @@ export default function LoginPage() {
   const [success, setSuccess] = useState("");
   const [rememberMe, setRememberMe] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const supabase = createClientComponentClient()
 
   useEffect(() => {
+    const errorParam = searchParams.get("error")
+    const errorDescriptionParam = searchParams.get("error_description")
+    if (errorParam) {
+      setError(errorDescriptionParam || errorParam)
+    }
+
     // Persist theme on mount
     document.documentElement.classList.add("h-full")
     return () => {
       document.documentElement.classList.remove("h-full")
     }
-  }, []);
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,19 +76,12 @@ export default function LoginPage() {
       }
 
       setSuccess("Login realizado com sucesso! Redirecionando...")
-
-        setTimeout(() => {
-          router.push("/dashboard")
-        }, 1500)
+      setTimeout(() => {
+        router.push("/dashboard")
+      }, 1500)
     } catch (err: any) {
-      setError(err.message || "Erro de conexão. Tente novamente.");
-          setTimeout(() => {
-          }, 1500)
-
       setError(err.message || "Erro de conexão. Tente novamente.")
-      
-
-    }finally {
+    } finally {
       setLoading(false)
     }
   }
@@ -89,22 +90,17 @@ export default function LoginPage() {
     setLoading(true)
     setError("")
 
-    try {
-      const supabase = createClient()
-       const { error } = await supabase.auth.signInWithOAuth({
-         provider: "google",
-         options: {
-           redirectTo: `${location.origin}/auth/callback`,
-         },
-       });
-       if (error) {
-         setError(error.message);
-       }
-     } catch (err: any) {
-       setError(err.message || "Erro no login com Google");
-     } finally {
-       setLoading(false);
-     }
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${location.origin}/auth/callback`,
+      },
+    });
+
+    if (error) {
+      setError(`Erro no login com Google: ${error.message}`);
+      setLoading(false);
+    }
   };
 
   const features = [

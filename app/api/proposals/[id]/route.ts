@@ -1,49 +1,37 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
-import { NextResponse } from 'next/server'
-import { z } from 'zod'
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
+import { requireUserType } from "@/middleware/auth";
+import { NextRequestWithUser } from "@/types";
 
-const updateProposalSchema = z.object({
-  status: z.enum(['accepted', 'rejected']),
-})
+export async function PUT(request: NextRequestWithUser, { params }: { params: { id: string } }) {
+  // Garante que apenas empresas podem aceitar propostas
+  const authResult = await requireUserType(["company"])(request);
+  if (authResult) return authResult;
 
-export async function PUT(
-  request: Request,
-  { params }: { params: { id: string } }
-) {
-  const proposalId = params.id
-  const cookieStore = cookies()
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore })
+  const proposalId = params.id;
+  const user = request.user;
 
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  try {
+    const { status } = await request.json();
+
+    if (status !== 'accepted') {
+      return NextResponse.json({ error: "Ação inválida. Apenas 'accepted' é permitido." }, { status: 400 });
+    }
+
+    // Chama a função do PostgreSQL que atualiza a proposta e o projeto de forma atômica
+    const { data, error } = await supabaseAdmin.rpc('update_proposal_status', {
+      proposal_id_to_update: proposalId,
+      new_status: 'accepted',
+      company_id_check: user.id
+    });
+
+    if (error || !data) {
+      return NextResponse.json({ error: "Proposta não encontrada ou você não tem permissão para aceitá-la." }, { status: 404 });
+    }
+
+    return NextResponse.json({ message: "Proposta aceita com sucesso!", data });
+
+  } catch (error) {
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 });
   }
-
-  const validation = updateProposalSchema.safeParse(await request.json())
-  if (!validation.success) {
-    return NextResponse.json({ errors: validation.error.flatten().fieldErrors }, { status: 400 })
-  }
-
-  const { status } = validation.data
-
-  // Iniciar uma transação para garantir a consistência dos dados
-  const { data: updatedProposal, error } = await supabase.rpc('update_proposal_status', {
-    proposal_id_to_update: proposalId,
-    new_status: status,
-    company_id_check: user.id
-  })
-
-  if (error) {
-    // O erro pode vir da RLS (se o usuário não for a empresa dona do projeto) ou da função
-    console.error('Erro ao atualizar proposta:', error)
-    return NextResponse.json({ error: 'Falha ao atualizar a proposta. Verifique suas permissões.' }, { status: 403 })
-  }
-  
-  if (!updatedProposal) {
-    return NextResponse.json({ error: 'Proposta não encontrada ou você não tem permissão.' }, { status: 404 })
-  }
-
-  return NextResponse.json(updatedProposal)
 }
-

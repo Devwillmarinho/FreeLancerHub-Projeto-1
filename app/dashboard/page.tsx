@@ -1,67 +1,58 @@
-// Caminho: app/dashboard/page.tsx
+import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+import DashboardClientPage from "./DashboardClientPage";
 
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs'
-import { cookies } from 'next/headers'
-import { redirect } from 'next/navigation'
-import DashboardClientPage from './DashboardClientPage.tsx' // Vamos mover a lógica do cliente para este novo arquivo
+// Garante que a página seja sempre renderizada dinamicamente
+export const dynamic = 'force-dynamic';
 
-// Tipagem para os perfis
-interface FreelancerProfile {
-  id: string;
-  full_name: string;
-  skills: string[];
+// Helper para tentar buscar o perfil, lidando com o lag do gatilho do banco de dados
+async function getProfileWithRetry(supabase: any, userId: string, retries = 3, delay = 500) {
+  for (let i = 0; i < retries; i++) {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("*, user_type")
+      .eq("id", userId)
+      .single();
+    
+    if (profile) return profile;
+
+    // Não tenta novamente em caso de erros reais, apenas se não encontrar o perfil
+    if (error && error.code !== 'PGRST116') throw error;
+
+    if (i < retries - 1) await new Promise(res => setTimeout(res, delay));
+  }
+  return null; // Perfil não encontrado após as tentativas
 }
 
-interface CompanyProfile {
-  id: string;
-  company_name: string;
-}
+export default async function Dashboard() {
+  const supabase = createServerComponentClient({ cookies });
 
-export default async function DashboardPage() {
-  const cookieStore = cookies()
-  const supabase = createServerComponentClient({ cookies: () => cookieStore })
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
 
-  // Usar getUser() é mais seguro pois valida a sessão com o servidor da Supabase.
-  const { data: { user } } = await supabase.auth.getUser()
-
-  // Se não houver usuário, redireciona para o login.
-  if (!user) {
-    redirect('/auth/login')
+  if (!session) {
+    // Esta é uma rota protegida, se não houver sessão, volta para o login.
+    redirect("/auth/login");
   }
 
-  // Precisamos da sessão para obter o access_token para as chamadas de API no cliente.
-  const { data: { session } } = await supabase.auth.getSession();
+  // Tenta buscar o perfil com algumas tentativas
+  const profile = await getProfileWithRetry(supabase, session.user.id);
 
-  const userId = user.id
-  let userProfile: FreelancerProfile | CompanyProfile | null = null;
-  let userType: 'freelancer' | 'company' | null = null;
-
-  // 1. Tenta buscar o perfil de freelancer
-  const { data: freelancerProfile } = await supabase.from('freelancers').select('*').eq('id', userId).single()
-
-  if (freelancerProfile) {
-    userProfile = freelancerProfile;
-    userType = 'freelancer';
-  } else {
-    // 2. Se não for freelancer, tenta buscar o perfil de empresa
-    const { data: companyProfile } = await supabase.from('companies').select('*').eq('id', userId).single()
-    if (companyProfile) {
-      userProfile = companyProfile;
-      userType = 'company';
-    }
+  // Se o perfil não for encontrado ou não tiver um tipo, redireciona para a página de completar o perfil.
+  if (!profile || !profile.user_type) {
+    console.log("Perfil incompleto, redirecionando para /auth/complete-profile");
+    redirect('/auth/complete-profile');
   }
 
-  if (!userProfile) {
-    // Isso pode acontecer por um breve momento se o perfil ainda não foi criado.
-    // Em um app de produção, você pode querer mostrar uma tela de "Finalize seu perfil".
-    return <div>Perfil não encontrado. Por favor, contate o suporte.</div>
-  }
-
-  // Não passe o objeto `session` inteiro. Passe apenas o que é necessário.
-  // Passamos os dados buscados no servidor como props para o componente de cliente.
-  return <DashboardClientPage 
-            accessToken={session?.access_token} 
-            userEmail={user.email} 
-            profile={userProfile} 
-            userType={userType} />
+  // Se o perfil foi encontrado e está completo, renderiza o dashboard.
+  return (
+    <DashboardClientPage
+      accessToken={session.access_token}
+      userEmail={session.user.email}
+      profile={profile}
+      userType={profile.user_type}
+    />
+  );
 }

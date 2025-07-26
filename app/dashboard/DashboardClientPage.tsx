@@ -31,6 +31,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { CardFooter } from "@/components/ui/card";
 import {
   Briefcase,
   Users,
@@ -52,7 +53,9 @@ import {
   Filter,
   Search,
   Loader2,
+  CheckCircle,
 } from "lucide-react";
+import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Session } from "@supabase/supabase-js";
 import { useToast } from "@/components/ui/use-toast";
@@ -90,8 +93,17 @@ interface DashboardClientPageProps {
     full_name?: string;
     company_name?: string;
     avatar_url?: string;
+    bio?: string | null;
+    skills?: string[] | null;
   };
   userType: 'freelancer' | 'company' | null;
+}
+
+type EditableProfile = {
+  full_name: string;
+  company_name?: string | null;
+  bio: string | null;
+  skills: string[];
 }
 
 export default function DashboardClientPage({ accessToken, userEmail, profile, userType }: DashboardClientPageProps) {
@@ -101,6 +113,13 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
 
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
+  const [editableProfile, setEditableProfile] = useState<EditableProfile>({
+    full_name: profile?.full_name ?? '',
+    company_name: profile?.company_name ?? '',
+    bio: profile?.bio ?? '',
+    skills: profile?.skills ?? [],
+  });
+  const [isUpdatingProfile, setIsUpdatingProfile] = useState(false);
   const [newProject, setNewProject] = useState({
     title: "",
     description: "",
@@ -116,6 +135,10 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
   const [contracts, setContracts] = useState<DashboardContract[]>([]);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isLoadingContracts, setIsLoadingContracts] = useState(true);
+  const [myGigs, setMyGigs] = useState<DashboardProject[]>([]);
+  const [browseProjects, setBrowseProjects] = useState<DashboardProject[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const stats = [
     {
@@ -152,81 +175,95 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
     },
   ];
 
+  // Estatísticas dinâmicas
+  const dynamicStats = [
+    {
+      ...stats[0],
+      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : projects.filter(p => p.status === 'open' || p.status === 'in_progress').length.toString(),
+      title: userType === 'company' ? 'Projetos Ativos' : 'Projetos em Andamento',
+    },
+    {
+      ...stats[1],
+      value: isLoadingProposals ? <Loader2 className="h-6 w-6 animate-spin" /> : proposals.length.toString(),
+      title: userType === 'company' ? 'Propostas Recebidas' : 'Propostas Enviadas',
+    },
+    {
+      ...stats[2],
+      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : `R$ ${projects.reduce((sum, p) => sum + p.budget, 0).toLocaleString('pt-BR')}`,
+    },
+    {
+      ...stats[3], // Taxa de sucesso pode ser calculada no futuro
+    }
+  ];
+
+  // Filtra os projetos com base na busca e no status
+  const filteredProjects = projects.filter(project => {
+    const matchesSearch = project.title.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesStatus = statusFilter === 'all' || project.status === statusFilter;
+    return matchesSearch && matchesStatus;
+  });
+
+  const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
+    if (status === 'open' || status === 'active') return 'default';
+    if (status === 'in_progress' || status === 'pending') return 'secondary';
+    if (status === 'completed') return 'outline';
+    return 'destructive';
+  }
+
   // O useEffect para buscar o usuário foi removido, pois os dados já vêm por props.
-  // Os useEffects para buscar projetos, propostas, etc., podem ser mantidos.
+  // Otimização: Busca todos os dados do dashboard em paralelo.
   useEffect(() => {
-    async function fetchProjects() {
-      if (!accessToken) {
-        setIsLoadingProjects(false);
-        return;
-      }
+    async function fetchDashboardData() {
+      if (!accessToken || !profile?.id) return;
+
+      setIsLoadingProjects(true);
+      setIsLoadingProposals(true);
+      setIsLoadingContracts(true);
+
       try {
-        const response = await fetch("/api/projects", {
+        const fetchWithAuth = (url: string) => fetch(url, {
           headers: {
             Authorization: `Bearer ${accessToken}`,
           },
         });
-        if (!response.ok) {
-          throw new Error("Falha ao buscar projetos");
+
+        const [projectsRes, proposalsRes, contractsRes] = await Promise.all([
+          fetchWithAuth("/api/projects"),
+          fetchWithAuth("/api/proposals"),
+          fetchWithAuth("/api/contracts"),
+        ]);
+
+        if (!projectsRes.ok || !proposalsRes.ok || !contractsRes.ok) {
+          throw new Error('Falha ao buscar dados do dashboard.');
         }
-        const data = await response.json();
-        setProjects(data.data || []);
+
+        const projectsData = await projectsRes.json();
+        const proposalsData = await proposalsRes.json();
+        const contractsData = await contractsRes.json();
+
+        const allProjects: DashboardProject[] = projectsData.data || [];
+        setProjects(allProjects);
+        setProposals(proposalsData.data || []);
+        setContracts(contractsData.data || []);
+
+        if (userType === 'freelancer') {
+          setMyGigs(allProjects.filter(p => p.freelancer_id === profile.id));
+          setBrowseProjects(allProjects.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
+        } else {
+          setMyGigs(allProjects);
+        }
       } catch (error) {
-        console.error("Falha ao buscar projetos:", error);
+        console.error("Falha ao buscar dados do dashboard:", error);
+        toast({ title: "Erro", description: "Não foi possível carregar os dados do dashboard.", variant: "destructive" });
       } finally {
         setIsLoadingProjects(false);
-      }
-    }
-    fetchProjects();
-  }, [accessToken]);
-
-  useEffect(() => {
-    async function fetchProposals() {
-      if (!accessToken) {
         setIsLoadingProposals(false);
-        return;
-      }
-      try {
-        const response = await fetch("/api/proposals", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        if (!response.ok) throw new Error("Falha ao buscar propostas");
-        const data = await response.json();
-        setProposals(data.data || []);
-      } catch (error) {
-        console.error("Falha ao buscar propostas:", error);
-      } finally {
-        setIsLoadingProposals(false);
-      }
-    }
-    fetchProposals();
-  }, [accessToken]);
-
-  useEffect(() => {
-    async function fetchContracts() {
-      if (!accessToken) {
-        setIsLoadingContracts(false);
-        return;
-      }
-      try {
-        const response = await fetch("/api/contracts", {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        });
-        if (!response.ok) throw new Error("Falha ao buscar contratos");
-        const data = await response.json();
-        setContracts(data.data || []);
-      } catch (error) {
-        console.error("Falha ao buscar contratos:", error);
-      } finally {
         setIsLoadingContracts(false);
       }
     }
-    fetchContracts();
-  }, [accessToken]);
+
+    fetchDashboardData();
+  }, [accessToken, userType, profile?.id, toast]);
 
   const handleCreateProject = async () => {
     if (!accessToken) {
@@ -286,10 +323,18 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
 
       const createdProject = await response.json();
       // Adicionado tratamento para diferentes formatos de resposta da API
-      const newProjectData = createdProject.data || createdProject;
-      setProjects([newProjectData, ...projects]);
+      const newProjectData = (createdProject.data || createdProject) as DashboardProject;
+      setProjects((prevProjects) => [newProjectData, ...prevProjects]);
 
       setShowNewProjectDialog(false);
+      setNewProject({ // Limpa o formulário
+        title: "",
+        description: "",
+        budget: "",
+        deadline: "",
+        skills: "",
+        category: "",
+      });
       toast({ title: "Sucesso!", description: "Seu projeto foi criado." });
     } catch (error: any) {
       console.error("Erro ao criar projeto:", error);
@@ -307,6 +352,41 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
     await supabase.auth.signOut();
     router.push('/auth/login');
     router.refresh();
+  };
+
+  const handleProfileUpdate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessToken || !profile) return;
+
+    setIsUpdatingProfile(true);
+    try {
+      const response = await fetch(`/api/profiles/${profile.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify(editableProfile),
+      });
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error || 'Falha ao atualizar o perfil.');
+      }
+
+      toast({ title: "Sucesso!", description: "Seu perfil foi atualizado." });
+      setShowProfileDialog(false);
+      // Força a recarga da página para que o novo nome apareça no header
+      router.refresh(); 
+    } catch (error: any) {
+      toast({
+        title: "Erro ao atualizar",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsUpdatingProfile(false);
+    }
   };
 
   return (
@@ -359,44 +439,55 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
                       Gerencie suas informações e configurações.
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-4">
-                      <div className="relative">
-                        <Avatar className="h-20 w-20">
-                          <AvatarImage src={profile?.avatar_url} />
-                          <AvatarFallback className="text-lg">
-                            {(profile?.full_name || profile?.company_name || 'U').substring(0, 2).toUpperCase()}
-                          </AvatarFallback>
-                        </Avatar>
-                        <Button size="sm" className="absolute -bottom-2 -right-2 rounded-full w-8 h-8 p-0">
-                          <Camera className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <div>
-                        <h3 className="font-semibold">{profile?.full_name || profile?.company_name}</h3>
-                        <p className="text-sm text-gray-600">{userEmail}</p>
-                        <Badge variant="secondary" className="capitalize mt-1">{userType}</Badge>
-                      </div>
-                    </div>
+                  <form onSubmit={handleProfileUpdate} className="space-y-4">
                     <div className="space-y-2">
-                      <Button variant="outline" className="w-full justify-start bg-transparent">
-                        <Settings className="mr-2 h-4 w-4" />
-                        Configurações da Conta
+                      <Label htmlFor="fullName">Nome Completo</Label>
+                      <Input 
+                        id="fullName" 
+                        value={editableProfile.full_name}
+                        onChange={(e) => setEditableProfile({...editableProfile, full_name: e.target.value})}
+                      />
+                    </div>
+                    {userType === 'company' && (
+                      <div className="space-y-2">
+                        <Label htmlFor="companyName">Nome da Empresa</Label>
+                        <Input 
+                          id="companyName" 
+                          value={editableProfile.company_name || ''}
+                          onChange={(e) => setEditableProfile({...editableProfile, company_name: e.target.value})}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="bio">Bio / Descrição</Label>
+                      <Textarea 
+                        id="bio" 
+                        value={editableProfile.bio || ''}
+                        onChange={(e) => setEditableProfile({...editableProfile, bio: e.target.value})}
+                        placeholder={userType === 'company' ? 'Descreva sua empresa...' : 'Fale sobre você...'}
+                      />
+                    </div>
+                    {/* A edição de skills pode ser adicionada aqui no futuro */}
+                    <div className="flex justify-between items-center pt-4">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700"
+                        onClick={handleSignOut}
+                      >
+                        <LogOut className="mr-2 h-4 w-4" />
+                        Sair
                       </Button>
-                      <Button variant="outline" className="w-full justify-start bg-transparent">
-                        <Bell className="mr-2 h-4 w-4" />
-                        Notificações
+                      <Button type="submit" disabled={isUpdatingProfile}>
+                        {isUpdatingProfile ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <CheckCircle className="mr-2 h-4 w-4" />
+                        )}
+                        {isUpdatingProfile ? 'Salvando...' : 'Salvar Alterações'}
                       </Button>
                     </div>
-                  </div>
-                  <Button
-                    variant="outline"
-                    className="w-full justify-start text-red-600 hover:text-red-700 bg-transparent"
-                    onClick={handleSignOut}
-                  >
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sair da Conta
-                  </Button>
+                  </form>
                 </DialogContent>
               </Dialog>
             </div>
@@ -407,11 +498,11 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
       <div className="container mx-auto px-4 py-8">
         {/* Cards de Estatísticas */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {stats.map((stat, index) => (
+          {dynamicStats.map((stat, index) => (
             <Card key={index} className="hover:shadow-lg transition-shadow">
               <CardContent className="p-6">
                 <div className="flex items-center justify-between mb-4">
-                  <div className={`p-3 rounded-full ${stat.bgColor}`}>
+                  <div className={`p-3 rounded-full ${stat.bgColor || 'bg-gray-100'}`}>
                     <stat.icon className={`h-6 w-6 ${stat.color}`} />
                   </div>
                   <div className="text-right">
@@ -428,11 +519,22 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
         {/* Conteúdo Principal com Abas */}
         <Tabs defaultValue="projects" className="space-y-6">
           <div className="flex items-center justify-between">
-            <TabsList className="grid w-full max-w-md grid-cols-4">
-              <TabsTrigger value="projects">Projetos</TabsTrigger>
-              <TabsTrigger value="proposals">Propostas</TabsTrigger>
-              <TabsTrigger value="messages">Mensagens</TabsTrigger>
-              <TabsTrigger value="contracts">Contratos</TabsTrigger>
+            <TabsList className="grid w-full max-w-lg grid-cols-4">
+              {userType === 'freelancer' ? (
+                <>
+                  <TabsTrigger value="browse">Explorar Projetos</TabsTrigger>
+                  <TabsTrigger value="projects">Meus Trabalhos</TabsTrigger>
+                  <TabsTrigger value="proposals">Minhas Propostas</TabsTrigger>
+                  <TabsTrigger value="contracts">Contratos</TabsTrigger>
+                </>
+              ) : (
+                <>
+                  <TabsTrigger value="projects">Meus Projetos</TabsTrigger>
+                  <TabsTrigger value="proposals">Propostas</TabsTrigger>
+                  <TabsTrigger value="messages">Mensagens</TabsTrigger>
+                  <TabsTrigger value="contracts">Contratos</TabsTrigger>
+                </>
+              )}
             </TabsList>
             {userType === 'company' && (
               <Dialog open={showNewProjectDialog} onOpenChange={setShowNewProjectDialog}>
@@ -481,16 +583,59 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
 
           <TabsContent value="projects">
             <Card>
-              <CardHeader>
-                <CardTitle>Meus Projetos</CardTitle>
-                <CardDescription>Visualize e gerencie seus projetos.</CardDescription>
+              <CardHeader className="flex flex-row items-center justify-between">
+                <div>
+                  <CardTitle>{userType === 'company' ? 'Meus Projetos' : 'Meus Trabalhos'}</CardTitle>
+                  <CardDescription>{userType === 'company' ? 'Visualize e gerencie seus projetos.' : 'Projetos que você está trabalhando ou já concluiu.'}</CardDescription>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar projetos..."
+                      className="pl-8 w-full md:w-[250px]"
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <Select value={statusFilter} onValueChange={setStatusFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Filtrar por status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="open">Aberto</SelectItem>
+                      <SelectItem value="in_progress">Em Andamento</SelectItem>
+                      <SelectItem value="completed">Concluído</SelectItem>
+                      <SelectItem value="cancelled">Cancelado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </CardHeader>
               <CardContent>
                 {isLoadingProjects ? (
                   <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
-                ) : projects.length > 0 ? (
-                  <div className="space-y-4">
-                    {projects.map((p) => <Card key={p.id}><CardContent className="p-4">{p.title}</CardContent></Card>)}
+                ) : myGigs.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {myGigs.map((project) => (
+                      <Link href={`/projects/${project.id}`} key={project.id} className="block">
+                        <Card className="flex flex-col justify-between hover:shadow-md transition-shadow duration-300 h-full">
+                          <CardHeader>
+                            <CardTitle className="text-lg">{project.title}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="flex-grow space-y-2 text-sm">
+                            <div className="flex items-center text-gray-600"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
+                            <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
+                          </CardContent>
+                          <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
+                            <Badge variant={getStatusVariant(project.status)} className="capitalize">{project.status.replace('_', ' ')}</Badge>
+                            <div className="space-x-2">
+                              <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                            </div>
+                          </CardFooter>
+                        </Card>
+                      </Link>
+                    ))}
                   </div>
                 ) : (
                   <p>Nenhum projeto encontrado.</p>
@@ -499,10 +644,48 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
             </Card>
           </TabsContent>
 
+          {userType === 'freelancer' && (
+            <TabsContent value="browse">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Explorar Novos Projetos</CardTitle>
+                  <CardDescription>Encontre a oportunidade perfeita para suas habilidades.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingProjects ? (
+                    <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                  ) : browseProjects.length > 0 ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {browseProjects.map((project) => (
+                        <Link href={`/projects/${project.id}`} key={project.id} className="block">
+                          <Card className="flex flex-col justify-between hover:shadow-md transition-shadow duration-300 h-full">
+                            <CardHeader>
+                              <CardTitle className="text-lg">{project.title}</CardTitle>
+                            </CardHeader>
+                            <CardContent className="flex-grow space-y-2 text-sm">
+                              <div className="flex items-center text-gray-600"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
+                              <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
+                            </CardContent>
+                            <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
+                              <Badge variant={getStatusVariant(project.status)} className="capitalize">{project.status.replace('_', ' ')}</Badge>
+                              <Button variant="default" size="sm">Ver Detalhes</Button>
+                            </CardFooter>
+                          </Card>
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <p>Nenhum projeto aberto no momento. Volte mais tarde!</p>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
           <TabsContent value="proposals">
             <Card>
               <CardHeader>
-                <CardTitle>Propostas</CardTitle>
+                <CardTitle>{userType === 'company' ? 'Propostas Recebidas' : 'Minhas Propostas'}</CardTitle>
                 <CardDescription>
                   {userType === 'company' ? 'Propostas recebidas para seus projetos.' : 'Suas candidaturas enviadas.'}
                 </CardDescription>
@@ -511,8 +694,26 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
                 {isLoadingProposals ? (
                   <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
                 ) : proposals.length > 0 ? (
-                  <div className="space-y-4">
-                    {proposals.map((p) => <Card key={p.id}><CardContent className="p-4">{p.project.title}</CardContent></Card>)}
+                  <div className="space-y-3">
+                    {proposals.map((proposal) => (
+                      <Card key={proposal.id} className="hover:shadow-md transition-shadow duration-300">
+                        <CardContent className="p-4 flex items-center justify-between">
+                          <div className="flex items-center space-x-4">
+                            <Avatar>
+                              <AvatarFallback>{proposal.freelancer.full_name.substring(0, 2).toUpperCase()}</AvatarFallback>
+                            </Avatar>
+                            <div>
+                              <p className="font-semibold text-blue-700">{proposal.freelancer.full_name}</p>
+                              <p className="text-sm text-gray-600">enviou uma proposta para <span className="font-medium">{proposal.project.title}</span></p>
+                            </div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant={getStatusVariant(proposal.status)} className="capitalize">{proposal.status}</Badge>
+                            <Button variant="outline" size="sm">Ver Proposta</Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
                 ) : (
                   <p>Nenhuma proposta encontrada.</p>
@@ -520,8 +721,30 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
               </CardContent>
             </Card>
           </TabsContent>
+          
+          <TabsContent value="messages">
+            <Card>
+              <CardHeader>
+                <CardTitle>Mensagens</CardTitle>
+                <CardDescription>Suas conversas sobre projetos.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p>Funcionalidade de mensagens em breve.</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
-          {/* Adicione aqui os TabsContent para 'messages' e 'contracts' seguindo o mesmo padrão */}
+          <TabsContent value="contracts">
+            <Card>
+              <CardHeader>
+                <CardTitle>Contratos</CardTitle>
+                <CardDescription>Gerencie seus contratos e pagamentos.</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p>Funcionalidade de contratos em breve.</p>
+              </CardContent>
+            </Card>
+          </TabsContent>
 
         </Tabs>
       </div>

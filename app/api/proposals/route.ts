@@ -19,8 +19,8 @@ export async function GET(request: NextRequestWithUser) {
       .from("proposals")
       .select(`
         *,
-        project:projects(id, title, company_id),
-        freelancer:users!proposals_freelancer_id_fkey(id, name, avatar_url, skills)
+        project: projects(id, title, company_id),
+        freelancer: profiles(id, full_name, avatar_url, skills)
       `)
       .order("created_at", { ascending: false })
 
@@ -111,8 +111,8 @@ export async function POST(request: NextRequestWithUser) {
       })
       .select(`
         *,
-        project:projects(id, title),
-        freelancer:users!proposals_freelancer_id_fkey(id, name, avatar_url)
+        project: projects(id, title),
+        freelancer: profiles(id, full_name, avatar_url)
       `)
       .single()
 
