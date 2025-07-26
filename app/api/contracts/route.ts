@@ -12,14 +12,12 @@ export async function GET(request: NextRequestWithUser) {
 
     let query = supabaseAdmin
       .from("contracts")
-      .select(
-        `
+      .select(`
         *,
-        project:projects(id, title, status),
-        company:users!contracts_company_id_fkey(id, name, company_name, avatar_url),
-        freelancer:users!contracts_freelancer_id_fkey(id, name, avatar_url)
-      `,
-      )
+        project:projects(id,title,status),
+        company:company_id(id,company_name),
+        freelancer:freelancer_id(id,full_name,portfolio_url)
+      `)
       .order("created_at", { ascending: false })
 
     // Filtra contratos baseado no tipo de usuário

@@ -1,92 +1,120 @@
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { supabaseAdmin } from '@/lib/supabase';
+import { authMiddleware, requireUserType } from '@/middleware/auth';
+import { NextRequestWithUser } from '@/types';
 
+// Schema para validar os dados de um novo projeto
 const createProjectSchema = z.object({
-  title: z.string().min(5, 'O título deve ter pelo menos 5 caracteres.'),
-  description: z.string().min(20, 'A descrição deve ter pelo menos 20 caracteres.'),
+  title: z.string().min(1, 'O título é obrigatório.'),
+  description: z.string().min(1, 'A descrição é obrigatória.'),
   budget: z.number().positive('O orçamento deve ser um número positivo.'),
   required_skills: z.array(z.string()).min(1, 'Pelo menos uma habilidade é necessária.'),
 });
 
-/**
- * GET: Lista todos os projetos.
- * A segurança é garantida pelas Políticas de RLS (Row Level Security) no Supabase.
- * - Usuários autenticados podem ver todos os projetos.
- */
-export async function GET(request: Request) {
-  const cookieStore = cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+// Query consistente para GET, POST e DELETE
+const projectWithCompanyQuery = `
+  *,
+  company:company_id(
+    id,
+    full_name:company_name
+  )
+`;
 
-  const { data: { session } } = await supabase.auth.getSession();
+// Handler para GET (Listar projetos)
+export async function GET(request: NextRequestWithUser) {
+  const authResult = await authMiddleware(request);
+  if (authResult) return authResult;
 
-  if (!session) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('projects')
+      .select(projectWithCompanyQuery)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Erro ao buscar projetos:', error);
+      return NextResponse.json({ error: 'Falha ao buscar projetos.' }, { status: 500 });
+    }
+
+    return NextResponse.json({ data });
+  } catch (error: any) {
+    console.error('Erro interno do servidor:', error);
+    return NextResponse.json({ error: 'Erro interno do servidor.' }, { status: 500 });
   }
-
-  // A RLS já filtra os dados, então a query é simples.
-  const { data: projects, error } = await supabase
-    .from('projects')
-    .select('*')
-    .order('created_at', { ascending: false });
-
-  if (error) {
-    console.error('Error fetching projects:', error);
-    return NextResponse.json({ error: 'Falha ao buscar projetos' }, { status: 500 });
-  }
-
-  return NextResponse.json({ data: projects }, { status: 200 });
 }
 
-export async function POST(request: Request) {
-  const cookieStore = cookies();
-  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
+// Handler para POST (Criar novo projeto)
+export async function POST(request: NextRequestWithUser) {
+  const authResult = await requireUserType(['company'])(request);
+  if (authResult) return authResult;
+  const user = request.user;
 
-  // Obter o usuário logado para autorização
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 });
-  }
-
-  // A verificação de `user_metadata` foi removida.
-  // A política de RLS no banco de dados é a fonte de verdade para autorização.
-  // Se um não-empresa tentar inserir, o Supabase retornará um erro de violação de RLS.
   const body = await request.json();
-
-  // Validar os dados
   const validation = createProjectSchema.safeParse(body);
+
   if (!validation.success) {
-    return NextResponse.json(
-      { errors: validation.error.flatten().fieldErrors },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Dados do projeto inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 });
   }
 
-  // Inserir no banco de dados
-  const { data: newProject, error } = await supabase
-    .from('projects')
-    .insert({
-      ...validation.data,
-      company_id: user.id, // Associar o projeto à empresa logada
-    })
-    .select()
-    .single();
+  try {
+    const { data: newProject, error: insertError } = await supabaseAdmin
+      .from('projects')
+      .insert({ ...validation.data, company_id: user.id })
+      .select(projectWithCompanyQuery)
+      .single();
 
-  if (error) {
-    // Verifica se o erro é de violação de RLS para dar uma mensagem mais clara
-    if (error.code === '42501') {
-      return NextResponse.json(
-        { error: 'Apenas empresas podem criar projetos.' },
-        { status: 403 } // 403 Forbidden
-      );
+    if (insertError) throw insertError;
+
+    return NextResponse.json({ data: newProject }, { status: 201 });
+  } catch (error: any) {
+    console.error('Erro ao criar projeto:', error);
+    return NextResponse.json({ error: error.message || 'Erro interno do servidor.' }, { status: 500 });
+  }
+}
+
+// Handler para DELETE (Apagar projeto)
+export async function DELETE(request: NextRequestWithUser) {
+  const authResult = await requireUserType(['company'])(request);
+  if (authResult) return authResult;
+  const user = request.user;
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get('id');
+
+    if (!projectId) {
+      return NextResponse.json({ error: 'ID do projeto é obrigatório.' }, { status: 400 });
     }
-    console.error('Project creation error:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
 
-  return NextResponse.json({ data: newProject }, { status: 201 });
+    // Verifica se o projeto existe e pertence à empresa do usuário
+    const { data: project, error: fetchError } = await supabaseAdmin
+      .from('projects')
+      .select('id, company_id')
+      .eq('id', projectId)
+      .single();
+
+    if (fetchError || !project) {
+      return NextResponse.json({ error: 'Projeto não encontrado.' }, { status: 404 });
+    }
+
+    if (project.company_id !== user.id) {
+      return NextResponse.json({ error: 'Você não tem permissão para deletar este projeto.' }, { status: 403 });
+    }
+
+    // Deleta o projeto
+    const { error: deleteError } = await supabaseAdmin
+      .from('projects')
+      .delete()
+      .eq('id', projectId);
+
+    if (deleteError) {
+      throw deleteError;
+    }
+
+    return NextResponse.json({ message: 'Projeto deletado com sucesso.' });
+  } catch (error: any) {
+    console.error('Erro ao deletar projeto:', error);
+    return NextResponse.json({ error: error.message || 'Erro interno do servidor.' }, { status: 500 });
+  }
 }

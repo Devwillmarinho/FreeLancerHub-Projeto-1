@@ -6,6 +6,25 @@ import DashboardClientPage from "./DashboardClientPage";
 // Garante que a página seja sempre renderizada dinamicamente
 export const dynamic = 'force-dynamic';
 
+// Helper para tentar buscar o perfil, lidando com o lag do gatilho do banco de dados
+async function getProfileWithRetry(supabase: any, userId: string, retries = 3, delay = 500) {
+  for (let i = 0; i < retries; i++) {
+    const { data: profile, error } = await supabase
+      .from("profiles")
+      .select("*, user_type")
+      .eq("id", userId)
+      .single();
+    
+    if (profile) return profile;
+
+    // Não tenta novamente em caso de erros reais, apenas se não encontrar o perfil
+    if (error && error.code !== 'PGRST116') throw error;
+
+    if (i < retries - 1) await new Promise(res => setTimeout(res, delay));
+  }
+  return null; // Perfil não encontrado após as tentativas
+}
+
 export default async function Dashboard() {
   const supabase = createServerComponentClient({ cookies });
 
@@ -18,46 +37,18 @@ export default async function Dashboard() {
     redirect("/auth/login");
   }
 
-  // Busca o perfil do usuário no banco de dados.
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", session.user.id)
-    .single();
+  // Tenta buscar o perfil com algumas tentativas
+  const profile = await getProfileWithRetry(supabase, session.user.id);
 
-  // Se o perfil não for encontrado (ex: lag do banco de dados após um novo cadastro),
-  // criamos um objeto de perfil "reserva" com os dados da sessão.
-  // Isso evita que o usuário veja um erro e permite que ele prossiga.
-  if (!profile) {
-    console.warn("Perfil não encontrado, criando um perfil reserva para o dashboard. Isso é esperado para novos cadastros.");
-    
-    // Esta é a chave para resolver o problema.
-    // Em vez de mostrar um erro, construímos um perfil temporário.
-    const fallbackProfile = {
-      id: session.user.id,
-      full_name: session.user.user_metadata.full_name || session.user.email,
-      company_name: session.user.user_metadata.company_name || null,
-      avatar_url: session.user.user_metadata.avatar_url || null,
-      user_type: session.user.user_metadata.user_type || 'freelancer', // Padrão para um tipo
-      bio: null,
-      skills: [],
-      updated_at: new Date().toISOString(),
-    };
-
-    return (
-      <DashboardClientPage
-        accessToken={session.access_token}
-        userEmail={session.user.email}
-        profile={fallbackProfile}
-        userType={fallbackProfile.user_type as 'freelancer' | 'company'}
-      />
-    );
+  // Se o perfil não for encontrado ou não tiver um tipo, redireciona para a página de completar o perfil.
+  if (!profile || !profile.user_type) {
+    console.log("Perfil incompleto, redirecionando para /auth/complete-profile");
+    redirect('/auth/complete-profile');
   }
 
-  // Se o perfil foi encontrado, renderiza o dashboard com os dados reais.
+  // Se o perfil foi encontrado e está completo, renderiza o dashboard.
   return (
     <DashboardClientPage
-      accessToken={session.access_token}
       userEmail={session.user.email}
       profile={profile}
       userType={profile.user_type}

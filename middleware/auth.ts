@@ -1,59 +1,72 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { verifyToken, hasPermission } from "@/lib/auth"
-import { supabaseAdmin } from "@/lib/supabase"
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
+import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+import type { NextRequestWithUser } from '@/types';
 
-export async function authMiddleware(request: NextRequest) {
-  const token = request.headers.get("authorization")?.replace("Bearer ", "")
+/**
+ * Middleware de autenticação para rotas de API.
+ * Em vez de validar o token do cabeçalho, criamos um cliente Supabase no lado do servidor
+ * com os cookies da requisição. Isso permite que o Supabase gerencie a sessão de forma segura
+ * e lide com a atualização de tokens automaticamente.
+ */
+export async function authMiddleware(request: NextRequestWithUser): Promise<NextResponse | null> {
+  try {
+    // Cria um cliente Supabase que pode ler os cookies da requisição.
+    const supabase = createRouteHandlerClient({ cookies });
 
-  if (!token) {
-    return NextResponse.json({ error: "Token required" }, { status: 401 })
-  }
+    // Tenta obter a sessão do usuário a partir dos cookies.
+    const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();
 
-  const decoded = verifyToken(token)
-  if (!decoded) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 })
-  }
-
-  // Verificar se o usuário ainda existe e está ativo
-  const { data: user, error } = await supabaseAdmin
-    .from("users")
-    .select("*")
-    .eq("id", decoded.id)
-    .eq("is_active", true)
-    .single()
-
-  if (error || !user) {
-    return NextResponse.json({ error: "User not found or inactive" }, { status: 401 })
-  }
-  // Adicionar usuário ao request
-  ;(request as any).user = user
-  return null
-}
-
-export function requirePermissions(permissions: string[]) {
-  return async (request: NextRequest) => {
-    const authResult = await authMiddleware(request)
-    if (authResult) return authResult
-
-    const user = (request as any).user
-    if (!hasPermission(user.user_type, permissions)) {
-      return NextResponse.json({ error: "Insufficient permissions" }, { status: 403 })
+    if (authError || !authUser) {
+      // Se houver um erro ou nenhum usuário, a sessão é inválida.
+      return NextResponse.json(
+        { error: 'Unauthorized: Invalid or expired session.' },
+        { status: 401 }
+      );
     }
 
-    return null
+    // Após autenticar, busca o perfil completo do usuário no banco de dados.
+    // Isso é crucial para ter acesso a campos como 'user_type', 'full_name', etc.
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', authUser.id)
+      .single();
+
+    if (profileError || !profile) {
+      // O usuário está autenticado, mas não tem um perfil.
+      // Isso pode acontecer logo após o cadastro ou se houver uma inconsistência.
+      return NextResponse.json({ error: 'Forbidden: User profile not found.' }, { status: 403 });
+    }
+
+    // Anexa um objeto de usuário combinado (auth + perfil) à requisição.
+    // Isso resolve o erro de tipo, pois o objeto agora contém todas as propriedades esperadas.
+    request.user = { ...authUser, ...profile };
+
+    // Retorna null para permitir que a requisição prossiga para a rota da API.
+    return null;
+  } catch (e) {
+    console.error('Erro inesperado no middleware de autenticação:', e);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-export function requireUserType(userTypes: string[]) {
-  return async (request: NextRequest) => {
-    const authResult = await authMiddleware(request)
-    if (authResult) return authResult
-
-    const user = (request as any).user
-    if (!userTypes.includes(user.user_type)) {
-      return NextResponse.json({ error: "Access denied for this user type" }, { status: 403 })
+export const requireUserType = (allowedTypes: Array<'freelancer' | 'company'>) => {
+  return async (request: NextRequestWithUser): Promise<NextResponse | null> => {
+    const authResult = await authMiddleware(request);
+    if (authResult) {
+      return authResult;
     }
 
-    return null
-  }
+    // O perfil completo já foi buscado pelo `authMiddleware` e está em `request.user`.
+    // Não é necessário fazer outra chamada ao banco de dados aqui.
+    const user = request.user;
+
+    if (!user || !user.user_type || !allowedTypes.includes(user.user_type as any)) {
+      return NextResponse.json({ error: 'Acesso negado para este tipo de usuário.' }, { status: 403 });
+    }
+
+    return null;
+  };
 }
