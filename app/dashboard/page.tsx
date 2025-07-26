@@ -49,7 +49,6 @@ export default async function Dashboard() {
   // Se o perfil foi encontrado e está completo, renderiza o dashboard.
   return (
     <DashboardClientPage
-      accessToken={session.access_token}
       userEmail={session.user.email}
       profile={profile}
       userType={profile.user_type}

@@ -1,19 +1,20 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { supabaseAdmin } from "@/lib/supabase"
-import { authMiddleware, requireUserType } from "@/middleware/auth"
-import { z } from "zod"
-import { NextRequestWithUser } from "@/types"
+import { type NextRequest } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
+import { authMiddleware, requireUserType } from "@/middleware/auth";
+import { z } from "zod";
+import { NextRequestWithUser } from "@/types";
+import { NextResponse } from 'next/server'
+
 
 export async function GET(request: NextRequestWithUser) {
-  const authResult = await authMiddleware(request)
-  if (authResult) return authResult
+  const authResult = await authMiddleware(request);
+  if (authResult) return authResult;
 
   try {
-    const { searchParams } = new URL(request.url)
-    const projectId = searchParams.get("project_id")
-    const status = searchParams.get("status")
-
-    const user = request.user
+    const { searchParams } = new URL(request.url);
+    const projectId = searchParams.get("project_id");
+    const status = searchParams.get("status");
+    const user = request.user;
 
     let query = supabaseAdmin
       .from("proposals")
@@ -22,34 +23,45 @@ export async function GET(request: NextRequestWithUser) {
         project: projects(id, title, company_id),
         freelancer: profiles(id, full_name, avatar_url, skills)
       `)
-      .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false });
 
-    // Filtros baseados no tipo de usuário
     if (user.user_type === "freelancer") {
-      query = query.eq("freelancer_id", user.id)
+      query = query.eq("freelancer_id", user.id);
     } else if (user.user_type === "company") {
-      // Empresas veem propostas dos seus projetos
-      query = query.eq("project.company_id", user.id)
+      // Busca os IDs dos projetos da empresa para filtrar propostas
+      const { data: projects, error: projectsError } = await supabaseAdmin
+        .from("projects")
+        .select("id")
+        .eq("company_id", user.id);
+
+      if (projectsError) {
+        console.error("Erro ao buscar projetos da empresa:", projectsError);
+        return NextResponse.json({ error: "Falha ao buscar projetos da empresa" }, { status: 500 });
+      }
+
+      const projectIds = projects?.map((p) => p.id) || [];
+      query = query.in("project_id", projectIds);
     }
 
     if (projectId) {
-      query = query.eq("project_id", projectId)
+      query = query.eq("project_id", projectId);
     }
 
     if (status) {
-      query = query.eq("status", status)
+      query = query.eq("status", status);
     }
 
-    const { data: proposals, error } = await query
+    const { data: proposals, error } = await query;
 
     if (error) {
-      return NextResponse.json({ error: "Failed to fetch proposals" }, { status: 500 })
+      console.error("Erro ao buscar propostas:", error);
+      return NextResponse.json({ error: "Falha ao buscar propostas" }, { status: 500 });
     }
 
-    return NextResponse.json({ data: proposals })
+    return NextResponse.json({ data: proposals });
   } catch (error) {
-    console.error("Proposals fetch error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Erro interno:", error);
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 });
   }
 }
 
@@ -61,11 +73,11 @@ const createProposalSchema = z.object({
 });
 
 export async function POST(request: NextRequestWithUser) {
-  const authResult = await requireUserType(["freelancer"])(request)
-  if (authResult) return authResult
+  const authResult = await requireUserType(["freelancer"])(request);
+  if (authResult) return authResult;
 
   try {
-    const body = await request.json()
+    const body = await request.json();
     const validation = createProposalSchema.safeParse(body);
 
     if (!validation.success) {
@@ -73,7 +85,7 @@ export async function POST(request: NextRequestWithUser) {
     }
 
     const { project_id, message, proposed_budget, estimated_duration } = validation.data;
-    const user = request.user
+    const user = request.user;
 
     // Verificar se o projeto existe e está aberto
     const { data: project, error: projectError } = await supabaseAdmin
@@ -81,10 +93,10 @@ export async function POST(request: NextRequestWithUser) {
       .select("*")
       .eq("id", project_id)
       .eq("status", "open")
-      .single()
+      .single();
 
     if (projectError || !project) {
-      return NextResponse.json({ error: "Project not found or not open for proposals" }, { status: 404 })
+      return NextResponse.json({ error: "Projeto não encontrado ou não está aberto para propostas" }, { status: 404 });
     }
 
     // Verificar se o freelancer já fez uma proposta para este projeto
@@ -93,10 +105,10 @@ export async function POST(request: NextRequestWithUser) {
       .select("id")
       .eq("project_id", project_id)
       .eq("freelancer_id", user.id)
-      .single()
+      .single();
 
     if (existingProposal) {
-      return NextResponse.json({ error: "You have already submitted a proposal for this project" }, { status: 409 })
+      return NextResponse.json({ error: "Você já enviou uma proposta para este projeto" }, { status: 409 });
     }
 
     const { data: proposal, error } = await supabaseAdmin
@@ -114,22 +126,22 @@ export async function POST(request: NextRequestWithUser) {
         project: projects(id, title),
         freelancer: profiles(id, full_name, avatar_url)
       `)
-      .single()
+      .single();
 
     if (error) {
-      console.error("Proposal creation error:", error)
-      return NextResponse.json({ error: "Failed to create proposal" }, { status: 500 })
+      console.error("Erro ao criar proposta:", error);
+      return NextResponse.json({ error: "Falha ao criar proposta" }, { status: 500 });
     }
 
     return NextResponse.json(
       {
         data: proposal,
-        message: "Proposal submitted successfully",
+        message: "Proposta enviada com sucesso",
       },
       { status: 201 },
-    )
+    );
   } catch (error) {
-    console.error("Proposal creation error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("Erro ao criar proposta:", error);
+    return NextResponse.json({ error: "Erro interno do servidor" }, { status: 500 });
   }
 }
