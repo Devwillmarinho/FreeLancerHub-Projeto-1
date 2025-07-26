@@ -1,11 +1,12 @@
 import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
 import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
-import ProjectDetailsClientPage from "./ProjectDetailsClientPage"; // O novo componente de cliente
+import ProjectDetailsClientPage from "./ProjectDetailsClientPage";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
-async function getProjectDetails(supabase: any, projectId: string) {
+async function getProjectDetails(supabase: SupabaseClient, projectId: string) {
   const { data: project, error } = await supabase
     .from("projects")
     .select(`
@@ -34,14 +35,20 @@ export default async function ProjectPage({ params }: { params: { id: string } }
   const supabase = createServerComponentClient({ cookies });
 
   const { data: { session } } = await supabase.auth.getSession();
-  
+
   const project = await getProjectDetails(supabase, params.id);
 
-  const { data: userProfile } = session ? await supabase
-    .from('profiles')
-    .select('*, user_type') // Garante que user_type seja selecionado
-    .eq('id', session.user.id)
-    .single() : { data: null };
+  let userProfile = null;
+
+  if (session) {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*, user_type")
+      .eq("id", session.user.id)
+      .single();
+
+    if (!error) userProfile = data;
+  }
 
   return (
     <ProjectDetailsClientPage

@@ -10,10 +10,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/use-toast';
-import { DollarSign, Calendar, Users, Loader2, Send, CheckCircle } from 'lucide-react';
+import { DollarSign, Calendar, Users, Loader2, Send, CheckCircle, Trash } from 'lucide-react';
 import Link from 'next/link';
 
-// Tipos para os dados recebidos do servidor
+// Definição dos tipos
 type Project = {
   id: string;
   title: string;
@@ -59,18 +59,54 @@ interface ProjectDetailsClientPageProps {
   userProfile: UserProfile;
 }
 
-export default function ProjectDetailsClientPage({ project, session, userProfile }: ProjectDetailsClientPageProps) {
+export default function ProjectDetailsClientPage({ project, session, userProfile }: ProjectDetailsClientPageProps): JSX.Element {
   const router = useRouter();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAccepting, setIsAccepting] = useState<string | null>(null);
   const [proposalMessage, setProposalMessage] = useState('');
   const [proposalBudget, setProposalBudget] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const isOwner = session?.user.id === project.company.id;
   const isFreelancer = userProfile?.user_type === 'freelancer';
   const hasAlreadyProposed = project.proposals.some(p => p.freelancer.id === session?.user.id);
 
+  // Função para deletar o projeto
+  const handleDeleteProject = async () => {
+    if (!session) {
+      toast({ title: "Não autenticado", description: "Você precisa estar logado para deletar um projeto.", variant: "destructive" });
+      return;
+    }
+
+    const confirmDelete = confirm("Tem certeza que deseja deletar este projeto? Essa ação não pode ser desfeita.");
+    if (!confirmDelete) return;
+
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/projects/${project.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Falha ao deletar o projeto.');
+      }
+
+      toast({ title: "Projeto deletado", description: "O projeto foi removido com sucesso." });
+      router.push('/dashboard'); // Volta para dashboard após deletar
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: 'destructive' });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Funções já existentes para enviar e aceitar propostas (não alteradas aqui)
   const handleSendProposal = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!session) return;
@@ -96,7 +132,7 @@ export default function ProjectDetailsClientPage({ project, session, userProfile
       }
 
       toast({ title: "Sucesso!", description: "Sua proposta foi enviada." });
-      router.refresh(); // Recarrega os dados do servidor para mostrar a proposta enviada
+      router.refresh();
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: 'destructive' });
     } finally {
@@ -134,6 +170,17 @@ export default function ProjectDetailsClientPage({ project, session, userProfile
   return (
     <div className="container mx-auto max-w-4xl py-12 px-4">
       <Button variant="outline" onClick={() => router.back()} className="mb-8">Voltar</Button>
+
+      {/* Botão de deletar, só aparece para o dono */}
+      {isOwner && (
+        <div className="mb-6">
+          <Button variant="destructive" onClick={handleDeleteProject} disabled={isDeleting}>
+            {isDeleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Trash className="mr-2 h-4 w-4" />}
+            {isDeleting ? 'Deletando...' : 'Deletar Projeto'}
+          </Button>
+        </div>
+      )}
+
       <div className="grid md:grid-cols-3 gap-8">
         {/* Coluna Principal */}
         <div className="md:col-span-2 space-y-8">

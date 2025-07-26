@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Search, Filter, DollarSign, Calendar, MapPin, Users, Briefcase } from "lucide-react"
+import { useSession } from "@supabase/auth-helpers-react"
 
 export default function ProjectsPage() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -15,53 +16,74 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
-    const router = useRouter()
+  const router = useRouter()
+
+  // Pega a sessão do usuário com o Supabase Auth Helpers React
+  const session = useSession()
+
+  // Função genérica para fetch com token
+  async function fetchWithAuth(url: string) {
+    if (!session?.access_token) {
+      throw new Error("Usuário não autenticado")
+    }
+
+    const response = await fetch(url, {
+      headers: {
+        "Authorization": `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+      }
+    })
+
+    if (!response.ok) {
+      throw new Error(`Erro ${response.status}: ${response.statusText}`)
+    }
+
+    return response.json()
+  }
+
   useEffect(() => {
-    // Agora vamos buscar todos os projetos, o filtro será feito no frontend
     async function fetchAllProjects() {
       setIsLoading(true)
       try {
-        // Criar uma API route em /api/projects que retorna todos os projetos
-        // com informações da empresa e contagem de propostas
-        const response = await fetch("/api/projects")
-        if (!response.ok) {
-          throw new Error("Falha ao buscar projetos")
-        }
-        const data = await response.json()
+        const data = await fetchWithAuth("/api/projects")
         setProjects(data.data)
       } catch (error) {
-        console.error(error)
+        console.error("Falha ao buscar projetos:", error)
       } finally {
         setIsLoading(false)
       }
     }
+
     fetchAllProjects()
-  }, [])
+  }, [session]) // Quando a sessão mudar, refaz a busca
 
   const handleAcceptProposal = async (proposalId: string) => {
     try {
+      if (!session?.access_token) {
+        alert("Você precisa estar logado para aceitar propostas.")
+        return
+      }
+
       const response = await fetch(`/api/proposals/${proposalId}`, {
         method: "PUT",
         headers: {
+          "Authorization": `Bearer ${session.access_token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ status: "accepted" }),
       });
 
       if (!response.ok) {
-        // If not ok, it will redirect to same page
-        router.refresh();
-        throw new Error(`Failed to accept proposal: ${response.status}`);
+        throw new Error(`Failed to accept proposal: ${response.status}`)
       }
 
-      // If accepted, reload the data from server
       router.refresh();
 
     } catch (error: any) {
-      console.error("Error accepting proposal:", error);
-      alert(error.message || "Failed to accept proposal");
+      console.error("Error accepting proposal:", error)
+      alert(error.message || "Falha ao aceitar proposta")
     }
-  };
+  }
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -186,7 +208,6 @@ export default function ProjectsPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-medium text-gray-600">Propostas Totais</p>
-                  {/* A contagem de propostas deve vir da API para ser performático */}
                   <p className="text-2xl font-bold text-gray-900">{projects.reduce((acc, p) => acc + (p.proposals_count || 0), 0)}</p>
                 </div>
                 <Users className="h-8 w-8 text-purple-600" />
@@ -249,10 +270,10 @@ export default function ProjectsPage() {
                       <p className="text-sm font-medium text-gray-900">{project.company.company_name}</p>
                       {project.freelancer && <p className="text-sm text-gray-600">Freelancer: {project.freelancer}</p>}
                     </div>
-                      <div className="flex gap-2">
+                    <div className="flex gap-2">
                       {project.status === "open" && (
                         <Button size="sm" onClick={() => handleAcceptProposal(project.id)}>
-                            Aceitar Proposta
+                          Aceitar Proposta
                         </Button>
                       )}
 
