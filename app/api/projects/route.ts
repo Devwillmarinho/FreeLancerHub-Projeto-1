@@ -2,9 +2,9 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { supabaseAdmin } from '@/lib/supabase';
 import { authMiddleware, requireUserType } from '@/middleware/auth';
-import { NextRequestWithUser } from '@/types';
+import type { NextRequestWithUser } from '@/types';
 
-// Schema para validar os dados de um novo projeto
+// Schema de validação para criar projetos
 const createProjectSchema = z.object({
   title: z.string().min(1, 'O título é obrigatório.'),
   description: z.string().min(1, 'A descrição é obrigatória.'),
@@ -12,7 +12,7 @@ const createProjectSchema = z.object({
   required_skills: z.array(z.string()).min(1, 'Pelo menos uma habilidade é necessária.'),
 });
 
-// Query consistente para GET, POST e DELETE
+// Query padrão de projeto com empresa
 const projectWithCompanyQuery = `
   *,
   company:company_id(
@@ -21,7 +21,7 @@ const projectWithCompanyQuery = `
   )
 `;
 
-// Handler para GET (Listar projetos)
+// GET - Listar Projetos
 export async function GET(request: NextRequestWithUser) {
   const authResult = await authMiddleware(request);
   if (authResult) return authResult;
@@ -44,23 +44,34 @@ export async function GET(request: NextRequestWithUser) {
   }
 }
 
-// Handler para POST (Criar novo projeto)
+// POST - Criar Projeto
 export async function POST(request: NextRequestWithUser) {
   const authResult = await requireUserType(['company'])(request);
   if (authResult) return authResult;
-  const user = request.user;
+
+  const user = request.user!;
 
   const body = await request.json();
   const validation = createProjectSchema.safeParse(body);
 
   if (!validation.success) {
-    return NextResponse.json({ error: "Dados do projeto inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 });
+    return NextResponse.json(
+      { error: "Dados do projeto inválidos.", issues: validation.error.flatten().fieldErrors },
+      { status: 400 }
+    );
+  }
+
+  if (!user.company_id) {
+    return NextResponse.json({ error: "Usuário não está associado a uma empresa." }, { status: 400 });
   }
 
   try {
     const { data: newProject, error: insertError } = await supabaseAdmin
       .from('projects')
-      .insert({ ...validation.data, company_id: user.id })
+      .insert({
+        ...validation.data,
+        company_id: user.company_id, // associando corretamente à empresa do usuário
+      })
       .select(projectWithCompanyQuery)
       .single();
 
@@ -73,21 +84,20 @@ export async function POST(request: NextRequestWithUser) {
   }
 }
 
-// Handler para DELETE (Apagar projeto)
+// DELETE - Deletar Projeto
 export async function DELETE(request: NextRequestWithUser) {
   const authResult = await requireUserType(['company'])(request);
   if (authResult) return authResult;
-  const user = request.user;
+
+  const user = request.user!;
+  const { searchParams } = new URL(request.url);
+  const projectId = searchParams.get('id');
+
+  if (!projectId) {
+    return NextResponse.json({ error: 'ID do projeto é obrigatório.' }, { status: 400 });
+  }
 
   try {
-    const { searchParams } = new URL(request.url);
-    const projectId = searchParams.get('id');
-
-    if (!projectId) {
-      return NextResponse.json({ error: 'ID do projeto é obrigatório.' }, { status: 400 });
-    }
-
-    // Verifica se o projeto existe e pertence à empresa do usuário
     const { data: project, error: fetchError } = await supabaseAdmin
       .from('projects')
       .select('id, company_id')
@@ -98,11 +108,10 @@ export async function DELETE(request: NextRequestWithUser) {
       return NextResponse.json({ error: 'Projeto não encontrado.' }, { status: 404 });
     }
 
-    if (project.company_id !== user.id) {
+    if (project.company_id !== user.company_id) {
       return NextResponse.json({ error: 'Você não tem permissão para deletar este projeto.' }, { status: 403 });
     }
 
-    // Deleta o projeto
     const { error: deleteError } = await supabaseAdmin
       .from('projects')
       .delete()
