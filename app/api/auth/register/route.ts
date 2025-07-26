@@ -24,18 +24,18 @@ export async function POST(request: Request) {
 
     const { email, password, name, user_type, company_name, bio, skills } = validation.data;
 
-    // Passo 1: Criar o usuário no Supabase Auth
-    // Passamos os metadados essenciais aqui para que o gatilho possa usá-los.
+    // Criar o usuário no Supabase Auth, passando todos os dados do perfil
+    // para que o gatilho possa criar o perfil completo de uma só vez.
     const { data: signUpData, error: signUpError } = await supabaseAdmin.auth.signUp({
       email,
       password,
       options: {
-        // A CHAVE PARA O PROBLEMA ESTÁ AQUI:
-        // O campo 'data' popula o 'raw_user_meta_data' que o nosso gatilho lê.
         data: {
           full_name: name,
-          company_name: user_type === 'company' ? company_name : null,
           user_type: user_type,
+          company_name: user_type === 'company' ? company_name : null,
+          bio: bio,
+          skills: skills,
         },
       },
     });
@@ -51,10 +51,6 @@ export async function POST(request: Request) {
     if (!signUpData.user) {
         return NextResponse.json({ error: "Não foi possível criar o usuário." }, { status: 500 });
     }
-
-    // Passo 2: Atualizar o perfil recém-criado com dados adicionais (bio, skills)
-    // O gatilho já criou a linha básica do perfil, agora a enriquecemos.
-    await supabaseAdmin.from('profiles').update({ bio, skills }).eq('id', signUpData.user.id);
 
     return NextResponse.json({ message: "Usuário criado com sucesso!", user: signUpData.user }, { status: 201 });
 

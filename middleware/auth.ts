@@ -16,10 +16,9 @@ export async function authMiddleware(request: NextRequest) {
 
   // Verificar se o usuário ainda existe e está ativo
   const { data: user, error } = await supabaseAdmin
-    .from("users")
+    .from("profiles")
     .select("*")
     .eq("id", decoded.id)
-    .eq("is_active", true)
     .single()
 
   if (error || !user) {
