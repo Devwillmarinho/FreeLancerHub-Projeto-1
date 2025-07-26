@@ -48,6 +48,7 @@ import {
   LogOut,
   Edit,
   Trash2,
+  Trash,
   Eye,
   Send,
   Filter,
@@ -67,6 +68,12 @@ interface DashboardProject {
   budget: number;
   deadline: string | null;
   status: string;
+  company: {
+    id: string;
+    full_name: string | null;
+    company_name: string | null;
+    avatar_url: string | null;
+  } | null;
 }
 
 interface DashboardProposal {
@@ -86,7 +93,6 @@ interface DashboardContract {
 
 // Props que o componente receberá do "porteiro" (page.tsx)
 interface DashboardClientPageProps {
-  accessToken: string | undefined;
   userEmail: string | undefined;
   profile: {
     id: string;
@@ -106,8 +112,8 @@ type EditableProfile = {
   skills: string[];
 }
 
-export default function DashboardClientPage({ accessToken, userEmail, profile, userType }: DashboardClientPageProps) {
-  const [supabase] = useState(() => createClientComponentClient());
+export default function DashboardClientPage({ userEmail, profile, userType }: DashboardClientPageProps) {
+  const supabase = createClientComponentClient();
   const router = useRouter();
   const { toast } = useToast();
 
@@ -136,6 +142,7 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isLoadingContracts, setIsLoadingContracts] = useState(true);
   const [myGigs, setMyGigs] = useState<DashboardProject[]>([]);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [browseProjects, setBrowseProjects] = useState<DashboardProject[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -214,16 +221,24 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
   // Otimização: Busca todos os dados do dashboard em paralelo.
   useEffect(() => {
     async function fetchDashboardData() {
-      if (!accessToken || !profile?.id) return;
+      // Pega a sessão mais recente do lado do cliente para garantir um token válido.
+      const { data: { session } } = await supabase.auth.getSession();
+
+      if (!session || !profile?.id) {
+        // Se não houver sessão, talvez redirecionar para o login
+        toast({ title: "Sessão expirada", description: "Por favor, faça login novamente.", variant: "destructive" });
+        router.push('/auth/login');
+        return;
+      }
 
       setIsLoadingProjects(true);
       setIsLoadingProposals(true);
       setIsLoadingContracts(true);
 
       try {
-        const fetchWithAuth = (url: string) => fetch(url, {
+        const fetchWithAuth = (url: string) => fetch(url, { // Agora usa o token da sessão atual
           headers: {
-            Authorization: `Bearer ${accessToken}`,
+            Authorization: `Bearer ${session.access_token}`,
           },
         });
 
@@ -247,8 +262,10 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
         setContracts(contractsData.data || []);
 
         if (userType === 'freelancer') {
-          setMyGigs(allProjects.filter(p => p.freelancer_id === profile.id));
-          setBrowseProjects(allProjects.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
+          // Esta lógica precisa ser ajustada, pois a propriedade freelancer_id não existe no tipo DashboardProject
+          // Assumindo que a API retornará essa informação no futuro.
+          // setMyGigs(allProjects.filter(p => (p as any).freelancer_id === profile.id));
+          // setBrowseProjects(allProjects.filter(p => p.status === 'open' && (p as any).freelancer_id !== profile.id));
         } else {
           setMyGigs(allProjects);
         }
@@ -263,15 +280,19 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
     }
 
     fetchDashboardData();
-  }, [accessToken, userType, profile?.id, toast]);
+  }, [userType, profile?.id, toast, router, supabase]); // accessToken removido das dependências
 
   const handleCreateProject = async () => {
-    if (!accessToken) {
+    // Pega a sessão mais recente do lado do cliente para garantir um token válido.
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
       toast({
         title: "Não autenticado",
         description: "Você precisa estar logado para criar um projeto.",
         variant: "destructive",
       });
+      router.push('/auth/login');
       return;
     }
 
@@ -291,7 +312,7 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           title: newProject.title,
@@ -325,6 +346,7 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
       // Adicionado tratamento para diferentes formatos de resposta da API
       const newProjectData = (createdProject.data || createdProject) as DashboardProject;
       setProjects((prevProjects) => [newProjectData, ...prevProjects]);
+      setMyGigs((prevGigs) => [newProjectData, ...prevGigs]); // <-- ADICIONE ESTA LINHA
 
       setShowNewProjectDialog(false);
       setNewProject({ // Limpa o formulário
@@ -354,9 +376,63 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
     router.refresh();
   };
 
+  const handleDeleteProject = async (projectId: string) => {
+    // Pega a sessão mais recente do lado do cliente para garantir um token válido.
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (!session) {
+      toast({
+        title: "Não autenticado",
+        description: "Você precisa estar logado para apagar um projeto.",
+        variant: "destructive",
+      });
+      router.push('/auth/login');
+      return;
+    }
+
+    // Confirmação para evitar exclusão acidental
+    if (!confirm('Tem certeza que deseja apagar este projeto? Esta ação não pode ser desfeita.')) {
+      return;
+    }
+
+    setDeletingProjectId(projectId);
+    try {
+      const response = await fetch(`/api/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Falha ao apagar o projeto.');
+      }
+
+      // Remove o projeto da lista na interface
+      setMyGigs((prevGigs) => prevGigs.filter(p => p.id !== projectId));
+      setProjects((prevProjects) => prevProjects.filter(p => p.id !== projectId));
+      toast({ title: "Sucesso!", description: "Projeto apagado." });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: 'destructive' });
+    } finally {
+      setDeletingProjectId(null);
+    }
+  };
+
   const handleProfileUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!accessToken || !profile) return;
+    
+    // Pega a sessão mais recente do lado do cliente para garantir um token válido.
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session || !profile) {
+      toast({
+        title: "Não autenticado",
+        description: "Você precisa estar logado para atualizar o perfil.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsUpdatingProfile(true);
     try {
@@ -364,7 +440,7 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${session.access_token}`,
         },
         body: JSON.stringify(editableProfile),
       });
@@ -630,7 +706,12 @@ export default function DashboardClientPage({ accessToken, userEmail, profile, u
                           <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
                             <Badge variant={getStatusVariant(project.status)} className="capitalize">{project.status.replace('_', ' ')}</Badge>
                             <div className="space-x-2">
-                              <Button variant="ghost" size="sm"><Eye className="h-4 w-4" /></Button>
+                              {userType === 'company' && (
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-100" onClick={(e) => { e.preventDefault(); handleDeleteProject(project.id); }} disabled={deletingProjectId === project.id}>
+                                  {deletingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash className="h-4 w-4" />}
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4" /></Button>
                             </div>
                           </CardFooter>
                         </Card>
