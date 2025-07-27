@@ -127,8 +127,26 @@ CREATE POLICY "Companies can create projects" ON public.projects
 FOR INSERT WITH CHECK (auth.uid() IN (SELECT id FROM public.profiles WHERE user_type = 'company'));
 
 -- Todos podem ver projetos abertos ('open')
-CREATE POLICY "Anyone can view open projects" ON public.projects
-FOR SELECT USING (true);
+-- REMOVEMOS a política antiga que deixava todo mundo ver tudo.
+DROP POLICY IF EXISTS "Anyone can view open projects" ON public.projects;
+
+-- ADICIONAMOS a nova política inteligente.
+CREATE POLICY "Users can view relevant projects" ON public.projects
+FOR SELECT USING (
+  (
+    -- REGRA 1: Empresas só podem ver seus próprios projetos.
+    (SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'company'
+    AND company_id = auth.uid()
+  ) OR (
+    -- REGRA 2: Freelancers podem ver todos os projetos abertos.
+    (SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'freelancer'
+    AND status = 'open'
+  ) OR (
+    -- REGRA 3 : Freelancers também podem ver projetos que já são deles.
+    (SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'freelancer'
+    AND freelancer_id = auth.uid()
+  )
+);
 
 -- Empresas só podem atualizar seus próprios projetos
 CREATE POLICY "Companies can update their own projects" ON public.projects
@@ -147,6 +165,10 @@ CREATE POLICY "Involved users can see proposals" ON public.proposals
 FOR SELECT USING (auth.uid() = freelancer_id OR auth.uid() = (SELECT company_id FROM public.projects WHERE id = project_id));
 
 -- Policies para o Supabase Storage
+-- Usuários envolvidos podem ver seus contratos
+CREATE POLICY "Involved users can view their own contracts" ON public.contracts
+FOR SELECT USING (auth.uid() = company_id OR auth.uid() = freelancer_id);
+
 -- (O bucket deve ser criado manualmente ou por um script de setup)
 
 -- Usuários autenticados podem fazer upload no bucket de arquivos

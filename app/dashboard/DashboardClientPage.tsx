@@ -68,6 +68,7 @@ interface DashboardProject {
   budget: number;
   deadline: string | null;
   status: string;
+  freelancer_id: string | null; // Adicionado para filtragem do freelancer
   company: {
     id: string;
     full_name: string | null;
@@ -89,6 +90,7 @@ interface DashboardContract {
   project: { title: string };
   freelancer: { full_name: string };
   status: string;
+  budget: number;
 }
 
 // Props que o componente receberá do "porteiro" (page.tsx)
@@ -182,11 +184,22 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     },
   ];
 
+  // Lógica para calcular o número de projetos ativos com base no tipo de usuário
+  const activeProjectsCount = () => {
+    if (userType === 'company') {
+      // Para empresas, conta todos os projetos que não estão finalizados ou cancelados.
+      return projects.filter(p => p.status === 'draft' || p.status === 'open' || p.status === 'in_progress').length;
+    }
+    // Para freelancers, conta apenas os projetos que estão de fato em andamento.
+    // Usamos 'myGigs' que já contém os projetos do freelancer.
+    return myGigs.filter(p => p.status === 'in_progress').length;
+  };
+
   // Estatísticas dinâmicas
   const dynamicStats = [
     {
       ...stats[0],
-      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : projects.filter(p => p.status === 'open' || p.status === 'in_progress').length.toString(),
+      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : activeProjectsCount().toString(),
       title: userType === 'company' ? 'Projetos Ativos' : 'Projetos em Andamento',
     },
     {
@@ -196,7 +209,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     },
     {
       ...stats[2],
-      value: isLoadingProjects ? <Loader2 className="h-6 w-6 animate-spin" /> : `R$ ${projects.reduce((sum, p) => sum + p.budget, 0).toLocaleString('pt-BR')}`,
+      value: isLoadingContracts ? <Loader2 className="h-6 w-6 animate-spin" /> : `R$ ${contracts.reduce((sum, c) => sum + c.budget, 0).toLocaleString('pt-BR')}`,
     },
     {
       ...stats[3], // Taxa de sucesso pode ser calculada no futuro
@@ -217,15 +230,11 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     return 'destructive';
   }
 
-  // O useEffect para buscar o usuário foi removido, pois os dados já vêm por props.
-  // Otimização: Busca todos os dados do dashboard em paralelo.
+  // A busca de dados agora é simplificada, pois as políticas de segurança (RLS)
+  // do Supabase já filtram os dados no backend.
   useEffect(() => {
-    async function fetchDashboardData() {
-      // Pega a sessão mais recente do lado do cliente para garantir um token válido.
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (!session || !profile?.id) {
-        // Se não houver sessão, talvez redirecionar para o login
+    const fetchDashboardData = async () => {
+      if (!profile?.id) {
         toast({ title: "Sessão expirada", description: "Por favor, faça login novamente.", variant: "destructive" });
         router.push('/auth/login');
         return;
@@ -236,38 +245,36 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       setIsLoadingContracts(true);
 
       try {
-        const fetchWithAuth = (url: string) => fetch(url, { // Agora usa o token da sessão atual
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-          },
-        });
+        // Pedimos os projetos diretamente ao Supabase.
+        // As regras de RLS que acabamos de criar vão filtrar os resultados automaticamente.
+        const { data: projectsData, error: projectsError } = await supabase
+          .from('projects')
+          .select(`
+            id, title, budget, status, freelancer_id,
+            company:profiles!company_id(id, full_name, company_name, avatar_url)
+          `)
+          .order('created_at', { ascending: false });
 
-        const [projectsRes, proposalsRes, contractsRes] = await Promise.all([
-          fetchWithAuth("/api/projects"),
-          fetchWithAuth("/api/proposals"),
-          fetchWithAuth("/api/contracts"),
-        ]);
+        // O mesmo para propostas e contratos.
+        const { data: proposalsData, error: proposalsError } = await supabase.from('proposals').select(`*, project:projects(title), freelancer:profiles(id, full_name)`);
+        const { data: contractsData, error: contractsError } = await supabase.from('contracts').select(`*, project:projects(title), company:profiles!company_id(id, company_name), freelancer:profiles!freelancer_id(id, full_name)`);
 
-        if (!projectsRes.ok || !proposalsRes.ok || !contractsRes.ok) {
-          throw new Error('Falha ao buscar dados do dashboard.');
+        if (projectsError || proposalsError || contractsError) {
+          throw projectsError || proposalsError || contractsError;
         }
 
-        const projectsData = await projectsRes.json();
-        const proposalsData = await proposalsRes.json();
-        const contractsData = await contractsRes.json();
-
-        const allProjects: DashboardProject[] = projectsData.data || [];
-        setProjects(allProjects);
-        setProposals(proposalsData.data || []);
-        setContracts(contractsData.data || []);
+        setProjects(projectsData || []);
+        setProposals(proposalsData || []);
+        setContracts(contractsData || []);
 
         if (userType === 'freelancer') {
-          // Esta lógica precisa ser ajustada, pois a propriedade freelancer_id não existe no tipo DashboardProject
-          // Assumindo que a API retornará essa informação no futuro.
-          // setMyGigs(allProjects.filter(p => (p as any).freelancer_id === profile.id));
-          // setBrowseProjects(allProjects.filter(p => p.status === 'open' && (p as any).freelancer_id !== profile.id));
+          // Para freelancers, separamos os projetos abertos dos que já são dele.
+          setMyGigs(projectsData.filter(p => p.freelancer_id === profile.id));
+          setBrowseProjects(projectsData.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
         } else {
-          setMyGigs(allProjects);
+          // Para empresas, a RLS já filtrou. Todos os projetos recebidos são dela.
+          setMyGigs(projectsData); // Para empresas, a RLS já filtrou
+          setBrowseProjects([]); // Empresas não exploram projetos
         }
       } catch (error) {
         console.error("Falha ao buscar dados do dashboard:", error);
@@ -277,10 +284,10 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         setIsLoadingProposals(false);
         setIsLoadingContracts(false);
       }
-    }
+    };
 
     fetchDashboardData();
-  }, [userType, profile?.id, toast, router, supabase]); // accessToken removido das dependências
+  }, [userType, profile?.id, toast, router, supabase]);
 
   const handleCreateProject = async () => {
     // Pega a sessão mais recente do lado do cliente para garantir um token válido.

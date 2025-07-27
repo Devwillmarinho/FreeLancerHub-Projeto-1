@@ -6,18 +6,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
+// Função para buscar detalhes do projeto
 async function getProjectDetails(supabase: SupabaseClient, projectId: string) {
   const { data: project, error } = await supabase
     .from("projects")
     .select(`
-      *,
-      company: profiles!projects_company_id_fkey (id, full_name, company_name, avatar_url),
+      id, title, description, budget, deadline, status, required_skills,
+      company: profiles!company_id (id, full_name, company_name, avatar_url),
       proposals (
         id,
         message,
         proposed_budget,
         status,
-        freelancer: profiles!proposals_freelancer_id_fkey (id, full_name, avatar_url)
+        freelancer: profiles!freelancer_id (id, full_name, avatar_url)
       )
     `)
     .eq("id", projectId)
@@ -28,7 +29,13 @@ async function getProjectDetails(supabase: SupabaseClient, projectId: string) {
     notFound();
   }
 
-  return project;
+  // Normalizar a company para ser um objeto único (não array)
+  const normalizedProject = {
+    ...project,
+    company: project.company ? project.company[0] : null,
+  };
+
+  return normalizedProject;
 }
 
 export default async function ProjectPage({ params }: { params: { id: string } }) {

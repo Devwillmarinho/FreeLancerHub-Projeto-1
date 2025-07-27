@@ -16,7 +16,7 @@ export async function GET(request: NextRequestWithUser) {
 
     const { data: reviews, error } = await supabaseAdmin
       .from("reviews")
-      .select(`*, reviewer:users!reviews_reviewer_id_fkey(id, name, avatar_url)`)
+      .select(`*, reviewer:profiles!reviewer_id(id, full_name, avatar_url)`)
       .eq("reviewed_id", userId)
       .order("created_at", { ascending: false })
 

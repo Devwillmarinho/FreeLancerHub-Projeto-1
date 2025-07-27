@@ -31,22 +31,8 @@ export async function authMiddleware(request: NextRequestWithUser) {
       );
     }
 
-    // Busca company_id
-    const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .select('id')
-      .eq('user_id', authUser.id)
-      .maybeSingle(); // <- IMPORTANTE
-
-    if (companyError) {
-      console.error('Erro ao buscar company:', companyError);
-      return NextResponse.json(
-        { error: 'Erro ao buscar empresa' },
-        { status: 500 }
-      );
-    }
-
-    const companyId = company?.id ?? null;
+    // Pega company_id direto do perfil
+    const companyId = profile.company_id ?? null;
 
     // Injeta user com perfil e company_id no request
     request.user = {

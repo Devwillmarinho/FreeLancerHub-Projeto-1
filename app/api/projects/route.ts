@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { supabaseAdmin } from '@/lib/supabase';
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
+import { cookies } from 'next/headers';
 import { authMiddleware, requireUserType } from '@/middleware/auth';
-import type { NextRequestWithUser } from '@/types';
+import type { NextRequestWithUser } from '@/types'; // Este tipo é usado por POST e DELETE
 
 // Schema de validação para criar projetos
 const createProjectSchema = z.object({
@@ -14,20 +15,28 @@ const createProjectSchema = z.object({
 
 // Query padrão de projeto com empresa
 const projectWithCompanyQuery = `
-  *,
-  company:company_id(
+  id, title, description, budget, deadline, status, required_skills,
+  company:profiles!company_id(
     id,
-    full_name:company_name
+    full_name,
+    company_name,
+    avatar_url
   )
 `;
 
 // GET - Listar Projetos
-export async function GET(request: NextRequestWithUser) {
-  const authResult = await authMiddleware(request);
-  if (authResult) return authResult;
+export async function GET(request: Request) {
+  // Usamos o createRouteHandlerClient para criar um cliente que respeita
+  // as políticas de RLS do usuário autenticado.
+  // Isso substitui o uso do supabaseAdmin, que ignora todas as políticas.
+  const cookieStore = cookies();
+  const supabase = createRouteHandlerClient({ cookies: () => cookieStore });
 
   try {
-    const { data, error } = await supabaseAdmin
+    // A consulta agora será filtrada automaticamente pela RLS no banco de dados.
+    // Uma empresa verá apenas seus projetos.
+    // Um freelancer verá projetos abertos e os que lhe foram atribuídos.
+    const { data, error } = await supabase
       .from('projects')
       .select(projectWithCompanyQuery)
       .order('created_at', { ascending: false });
@@ -45,6 +54,10 @@ export async function GET(request: NextRequestWithUser) {
 }
 
 // POST - Criar Projeto
+// O POST já usa o middleware requireUserType, que é correto para controle de acesso.
+// Para operações de escrita (POST, DELETE), usar o supabaseAdmin é aceitável
+// DESDE QUE você faça as verificações de permissão manualmente, como o middleware já faz.
+import { supabaseAdmin } from '@/lib/supabase';
 export async function POST(request: NextRequestWithUser) {
   const authResult = await requireUserType(['company'])(request);
   if (authResult) return authResult;
@@ -61,16 +74,12 @@ export async function POST(request: NextRequestWithUser) {
     );
   }
 
-  if (!user.company_id) {
-    return NextResponse.json({ error: "Usuário não está associado a uma empresa." }, { status: 400 });
-  }
-
   try {
     const { data: newProject, error: insertError } = await supabaseAdmin
       .from('projects')
       .insert({
         ...validation.data,
-        company_id: user.company_id, // associando corretamente à empresa do usuário
+        company_id: user.id, // A empresa é o próprio usuário autenticado.
       })
       .select(projectWithCompanyQuery)
       .single();
@@ -80,50 +89,6 @@ export async function POST(request: NextRequestWithUser) {
     return NextResponse.json({ data: newProject }, { status: 201 });
   } catch (error: any) {
     console.error('Erro ao criar projeto:', error);
-    return NextResponse.json({ error: error.message || 'Erro interno do servidor.' }, { status: 500 });
-  }
-}
-
-// DELETE - Deletar Projeto
-export async function DELETE(request: NextRequestWithUser) {
-  const authResult = await requireUserType(['company'])(request);
-  if (authResult) return authResult;
-
-  const user = request.user!;
-  const { searchParams } = new URL(request.url);
-  const projectId = searchParams.get('id');
-
-  if (!projectId) {
-    return NextResponse.json({ error: 'ID do projeto é obrigatório.' }, { status: 400 });
-  }
-
-  try {
-    const { data: project, error: fetchError } = await supabaseAdmin
-      .from('projects')
-      .select('id, company_id')
-      .eq('id', projectId)
-      .single();
-
-    if (fetchError || !project) {
-      return NextResponse.json({ error: 'Projeto não encontrado.' }, { status: 404 });
-    }
-
-    if (project.company_id !== user.company_id) {
-      return NextResponse.json({ error: 'Você não tem permissão para deletar este projeto.' }, { status: 403 });
-    }
-
-    const { error: deleteError } = await supabaseAdmin
-      .from('projects')
-      .delete()
-      .eq('id', projectId);
-
-    if (deleteError) {
-      throw deleteError;
-    }
-
-    return NextResponse.json({ message: 'Projeto deletado com sucesso.' });
-  } catch (error: any) {
-    console.error('Erro ao deletar projeto:', error);
     return NextResponse.json({ error: error.message || 'Erro interno do servidor.' }, { status: 500 });
   }
 }

@@ -58,7 +58,7 @@ export async function GET(request: NextRequestWithUser) {
     // Buscar mensagens
     const { data: messages, error: messagesError } = await supabaseAdmin
       .from("messages")
-      .select(`*, sender:users(id, name, avatar_url, user_type)`)
+      .select(`*, sender:profiles(id, full_name, avatar_url, user_type)`)
       .eq("project_id", projectId)
       .order("created_at", { ascending: true })
 
@@ -142,7 +142,7 @@ export async function POST(request: NextRequestWithUser) {
         file_url: fileUrl,
         file_name: fileName,
       })
-      .select("*, sender:users(id, name, avatar_url)")
+      .select("*, sender:profiles(id, full_name, avatar_url)")
       .single()
 
     if (insertError) throw insertError
