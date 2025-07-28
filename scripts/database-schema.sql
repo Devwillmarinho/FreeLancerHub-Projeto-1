@@ -9,7 +9,7 @@ CREATE TYPE public.proposal_status AS ENUM ('pending', 'accepted', 'rejected');
 -- NOTA: A tabela 'profiles' e o tipo 'user_type' já devem ter sido criados pelo script de correção anterior.
 -- Se você resetar o banco, pode descomentar as linhas abaixo para recriá-los.
 /*
-CREATE TYPE public.user_type AS ENUM ('company', 'freelancer');
+CREATE TYPE public.user_type AS ENUM ('company', 'freelancer', 'admin');
 
 CREATE TABLE public.profiles (
   id uuid NOT NULL PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -122,6 +122,13 @@ ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contracts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
 
+-- Políticas de Admin: Admins podem fazer tudo em todas as tabelas principais.
+CREATE POLICY "Admins can manage all projects" ON public.projects FOR ALL USING ((SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admins can manage all proposals" ON public.proposals FOR ALL USING ((SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admins can manage all messages" ON public.messages FOR ALL USING ((SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admins can manage all contracts" ON public.contracts FOR ALL USING ((SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'admin');
+CREATE POLICY "Admins can manage all reviews" ON public.reviews FOR ALL USING ((SELECT user_type FROM public.profiles WHERE id = auth.uid()) = 'admin');
+
 -- Apenas empresas autenticadas podem criar projetos
 CREATE POLICY "Companies can create projects" ON public.projects
 FOR INSERT WITH CHECK (auth.uid() IN (SELECT id FROM public.profiles WHERE user_type = 'company'));
@@ -188,22 +195,24 @@ CREATE OR REPLACE FUNCTION public.update_proposal_status(
 RETURNS proposals AS $$
 DECLARE
     updated_proposal proposals;
-    target_project_id UUID;
-    freelancer_to_assign_id UUID;
 BEGIN
-    -- Atualiza a proposta e retorna os dados
+    -- Atualiza a proposta, garantindo que a empresa é a dona do projeto.
+    -- Captura a linha inteira atualizada para a variável 'updated_proposal'.
     UPDATE public.proposals
     SET status = new_status
     WHERE id = proposal_id_to_update
-      AND project_id IN (SELECT id FROM public.projects WHERE company_id = company_id_check)
-    RETURNING *, project_id, freelancer_id INTO updated_proposal, target_project_id, freelancer_to_assign_id;
+      AND project_id IN (SELECT p.id FROM public.projects p WHERE p.company_id = company_id_check)
+    RETURNING * INTO updated_proposal;
 
-    -- Se a proposta foi aceita, atualiza o projeto
-    IF new_status = 'accepted' AND updated_proposal IS NOT NULL THEN
-        UPDATE public.projects
-        SET status = 'in_progress',
-            freelancer_id = freelancer_to_assign_id
-        WHERE id = target_project_id;
+    -- Se a atualização foi bem-sucedida (a proposta foi encontrada e pertence à empresa)
+    IF FOUND THEN
+        -- Se a proposta foi aceita, atualiza o projeto correspondente.
+        IF new_status = 'accepted' THEN
+            UPDATE public.projects
+            SET status = 'in_progress',
+                freelancer_id = updated_proposal.freelancer_id -- Pega o ID do freelancer da proposta atualizada
+            WHERE id = updated_proposal.project_id; -- Pega o ID do projeto da proposta atualizada
+        END IF;
     END IF;
 
     RETURN updated_proposal;

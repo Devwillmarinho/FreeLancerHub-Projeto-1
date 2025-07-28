@@ -31,6 +31,16 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { CardFooter } from "@/components/ui/card";
 import {
   Briefcase,
@@ -82,7 +92,8 @@ interface DashboardProposal {
   project: { title: string };
   freelancer: { full_name: string };
   status: string;
-  proposal_text: string;
+  message: string;
+  proposed_budget: number;
 }
 
 interface DashboardContract {
@@ -91,6 +102,15 @@ interface DashboardContract {
   freelancer: { full_name: string };
   status: string;
   budget: number;
+}
+
+interface AdminUser {
+  id: string;
+  full_name: string | null;
+  company_name: string | null;
+  email: string;
+  user_type: 'freelancer' | 'company' | 'admin';
+  avatar_url: string | null;
 }
 
 // Props que o componente receberá do "porteiro" (page.tsx)
@@ -104,7 +124,7 @@ interface DashboardClientPageProps {
     bio?: string | null;
     skills?: string[] | null;
   };
-  userType: 'freelancer' | 'company' | null;
+  userType: 'freelancer' | 'company' | 'admin' | null;
 }
 
 type EditableProfile = {
@@ -148,6 +168,12 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
   const [browseProjects, setBrowseProjects] = useState<DashboardProject[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [allUsers, setAllUsers] = useState<AdminUser[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [updatingProposalId, setUpdatingProposalId] = useState<string | null>(null);
+  const [viewingProposal, setViewingProposal] = useState<DashboardProposal | null>(null);
+  const [projectToDelete, setProjectToDelete] = useState<DashboardProject | null>(null);
+
 
   const stats = [
     {
@@ -212,7 +238,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       value: isLoadingContracts ? <Loader2 className="h-6 w-6 animate-spin" /> : `R$ ${contracts.reduce((sum, c) => sum + c.budget, 0).toLocaleString('pt-BR')}`,
     },
     {
-      ...stats[3], // Taxa de sucesso pode ser calculada no futuro
+      ...stats[3], // Taxa de sucesso é algo que vou botar só no futuro. to sem paciencia de fazer isso agora kkk.
     }
   ];
 
@@ -225,8 +251,9 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
 
   const getStatusVariant = (status: string): "default" | "secondary" | "destructive" | "outline" => {
     if (status === 'open' || status === 'active') return 'default';
-    if (status === 'in_progress' || status === 'pending') return 'secondary';
-    if (status === 'completed') return 'outline';
+    if (status === 'in_progress') return 'default'; // Usaremos 'default' como base para o amarelo
+    if (status === 'pending') return 'secondary';
+    if (status === 'completed') return 'default'; // Usaremos 'default' como base para o cinza
     return 'destructive';
   }
 
@@ -243,11 +270,12 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       setIsLoadingProjects(true);
       setIsLoadingProposals(true);
       setIsLoadingContracts(true);
+      if (userType === 'admin') setIsLoadingUsers(true);
 
       try {
         // Pedimos os projetos diretamente ao Supabase.
-        // As regras de RLS que acabamos de criar vão filtrar os resultados automaticamente.
-        const { data: projectsData, error: projectsError } = await supabase
+        // As regras de RLS que acabamos de criar vai filtrar os resultados no automático.
+        let projectsQuery = supabase
           .from('projects')
           .select(`
             id, title, budget, status, freelancer_id,
@@ -255,16 +283,38 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
           `)
           .order('created_at', { ascending: false });
 
-        // O mesmo para propostas e contratos.
-        const { data: proposalsData, error: proposalsError } = await supabase.from('proposals').select(`*, project:projects(title), freelancer:profiles(id, full_name)`);
+        // Adicionei um filtro explícito para garantir que a empresa veja apenas seus projetos.
+        // Isso funciona como uma camada extra de segurança e clareza, além do RLS no meu ponto de vista.
+        if (userType === 'company') {
+          projectsQuery = projectsQuery.eq('company_id', profile.id);
+        }
+
+        const { data: projectsData, error: projectsError } = await projectsQuery;
+
+        // Busca as propostas através da API, que já tem a lógica de permissão correta.
+        const { data: { session: apiSession } } = await supabase.auth.getSession();
+        if (!apiSession) {
+          throw new Error('Sessão não encontrada para chamada de API.');
+        }
+        const proposalsResponse = await fetch('/api/proposals', {
+          headers: {
+            Authorization: `Bearer ${apiSession.access_token}`,
+          },
+        });
+        if (!proposalsResponse.ok) {
+          throw new Error('Falha ao buscar propostas.');
+        }
+        const proposalsPayload = await proposalsResponse.json();
+        const proposalsData = proposalsPayload.data || [];
+
         const { data: contractsData, error: contractsError } = await supabase.from('contracts').select(`*, project:projects(title), company:profiles!company_id(id, company_name), freelancer:profiles!freelancer_id(id, full_name)`);
 
-        if (projectsError || proposalsError || contractsError) {
-          throw projectsError || proposalsError || contractsError;
+        if (projectsError || contractsError) {
+          throw projectsError || contractsError;
         }
 
         setProjects(projectsData || []);
-        setProposals(proposalsData || []);
+        setProposals(proposalsData);
         setContracts(contractsData || []);
 
         if (userType === 'freelancer') {
@@ -276,6 +326,23 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
           setMyGigs(projectsData); // Para empresas, a RLS já filtrou
           setBrowseProjects([]); // Empresas não exploram projetos
         }
+
+        // Se for admin, busca todos os usuários
+        if (userType === 'admin') {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session) {
+            const usersResponse = await fetch('/api/users', {
+              headers: {
+                Authorization: `Bearer ${session.access_token}`,
+              }
+            });
+            if (!usersResponse.ok) {
+              throw new Error('Falha ao buscar usuários');
+            }
+            const usersData = await usersResponse.json();
+            setAllUsers(usersData.data || []);
+          }
+        }
       } catch (error) {
         console.error("Falha ao buscar dados do dashboard:", error);
         toast({ title: "Erro", description: "Não foi possível carregar os dados do dashboard.", variant: "destructive" });
@@ -283,6 +350,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         setIsLoadingProjects(false);
         setIsLoadingProposals(false);
         setIsLoadingContracts(false);
+        if (userType === 'admin') setIsLoadingUsers(false);
       }
     };
 
@@ -397,11 +465,6 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       return;
     }
 
-    // Confirmação para evitar exclusão acidental
-    if (!confirm('Tem certeza que deseja apagar este projeto? Esta ação não pode ser desfeita.')) {
-      return;
-    }
-
     setDeletingProjectId(projectId);
     try {
       const response = await fetch(`/api/projects/${projectId}`, {
@@ -420,6 +483,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       setMyGigs((prevGigs) => prevGigs.filter(p => p.id !== projectId));
       setProjects((prevProjects) => prevProjects.filter(p => p.id !== projectId));
       toast({ title: "Sucesso!", description: "Projeto apagado." });
+      setProjectToDelete(null); // Fecha o diálogo de confirmação
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: 'destructive' });
     } finally {
@@ -472,8 +536,106 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     }
   };
 
+  const handleUpdateProposalStatus = async (proposalId: string, status: 'accepted' | 'rejected') => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({ title: "Não autenticado", variant: "destructive" });
+      return;
+    }
+
+    setUpdatingProposalId(proposalId);
+    try {
+      const response = await fetch(`/api/proposals/${proposalId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ status }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Falha ao atualizar a proposta.');
+      }
+
+      // Atualiza a lista de propostas na interface
+      setProposals(prev => prev.map(p => p.id === proposalId ? { ...p, status } : p));
+
+      // Se aceita, atualiza o status do projeto correspondente
+      if (status === 'accepted') {
+        const acceptedProposal = proposals.find(p => p.id === proposalId);
+        if (acceptedProposal) {
+          // Esta parte é uma melhoria de UX, mas o ideal seria recarregar os projetos
+          // ou receber o projeto atualizado da API. Por simplicidade, vamos recarregar.
+          router.refresh(); 
+        }
+      }
+
+      toast({ title: "Sucesso!", description: result.message });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: 'destructive' });
+    } finally {
+      setUpdatingProposalId(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Diálogo para Ver Proposta */}
+      <Dialog open={!!viewingProposal} onOpenChange={(isOpen) => !isOpen && setViewingProposal(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Detalhes da Proposta</DialogTitle>
+            <DialogDescription>
+              Proposta de <span className="font-semibold">{viewingProposal?.freelancer.full_name}</span> para o projeto <span className="font-semibold">{viewingProposal?.project.title}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          {viewingProposal && (
+            <div className="space-y-4 py-4">
+              <div>
+                <h4 className="font-semibold text-gray-800 mb-2">Mensagem do Freelancer:</h4>
+                <div className="p-4 bg-gray-100 rounded-md border">
+                  <p className="text-gray-700 whitespace-pre-wrap">{viewingProposal.message}</p>
+                </div>
+              </div>
+              <div>
+                <h4 className="font-semibold text-gray-800 mb-2">Orçamento Proposto:</h4>
+                <p className="text-lg font-bold text-green-600">
+                  R$ {viewingProposal.proposed_budget.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="flex justify-end pt-4">
+                  <Button onClick={() => setViewingProposal(null)}>Fechar</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo de Confirmação para Apagar Projeto */}
+      <AlertDialog open={!!projectToDelete} onOpenChange={(isOpen) => !isOpen && setProjectToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Você tem certeza absoluta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação não pode ser desfeita. Isso excluirá permanentemente o projeto
+              <span className="font-bold"> "{projectToDelete?.title}"</span> e todos os seus dados associados, como propostas e mensagens.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setProjectToDelete(null)}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => projectToDelete && handleDeleteProject(projectToDelete.id)}
+              disabled={deletingProjectId === projectToDelete?.id}
+            >
+              {deletingProjectId === projectToDelete?.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Sim, apagar projeto'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Header */}
       <header className="bg-white border-b shadow-sm">
         <div className="container mx-auto px-4 py-4">
@@ -600,9 +762,9 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         </div>
 
         {/* Conteúdo Principal com Abas */}
-        <Tabs defaultValue="projects" className="space-y-6">
+        <Tabs defaultValue={userType === 'admin' ? 'admin' : (userType === 'freelancer' ? 'browse' : 'projects')} className="space-y-6">
           <div className="flex items-center justify-between">
-            <TabsList className="grid w-full max-w-lg grid-cols-4">
+            <TabsList className={`grid w-full ${userType === 'admin' ? 'max-w-xl grid-cols-5' : 'max-w-lg grid-cols-4'}`}>
               {userType === 'freelancer' ? (
                 <>
                   <TabsTrigger value="browse">Explorar Projetos</TabsTrigger>
@@ -610,12 +772,13 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                   <TabsTrigger value="proposals">Minhas Propostas</TabsTrigger>
                   <TabsTrigger value="contracts">Contratos</TabsTrigger>
                 </>
-              ) : (
+              ) : ( // Empresa ou Admin
                 <>
-                  <TabsTrigger value="projects">Meus Projetos</TabsTrigger>
+                  <TabsTrigger value="projects">{userType === 'admin' ? 'Todos os Projetos' : 'Meus Projetos'}</TabsTrigger>
                   <TabsTrigger value="proposals">Propostas</TabsTrigger>
                   <TabsTrigger value="messages">Mensagens</TabsTrigger>
                   <TabsTrigger value="contracts">Contratos</TabsTrigger>
+                  {userType === 'admin' && <TabsTrigger value="admin">Painel Admin</TabsTrigger>}
                 </>
               )}
             </TabsList>
@@ -664,12 +827,61 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
             )}
           </div>
 
+          {userType === 'admin' && (
+            <TabsContent value="admin">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Painel de Administração</CardTitle>
+                  <CardDescription>
+                    Gerencie usuários, projetos e a saúde da plataforma.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {isLoadingUsers ? (
+                    <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                  ) : (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-medium">Lista de Usuários ({allUsers.length})</h3>
+                      <div className="border rounded-md">
+                        <div className="max-h-[400px] overflow-y-auto">
+                          {allUsers.map((user) => (
+                            <div key={user.id} className="flex items-center justify-between p-3 border-b last:border-b-0 hover:bg-gray-50">
+                              <div className="flex items-center space-x-3">
+                                <Avatar className="h-9 w-9">
+                                  <AvatarImage src={user.avatar_url ?? undefined} />
+                                  <AvatarFallback>{(user.full_name || user.company_name || 'U').substring(0, 2).toUpperCase()}</AvatarFallback>
+                                </Avatar>
+                                <div>
+                                  <p className="font-semibold">{user.full_name || user.company_name}</p>
+                                  <p className="text-sm text-gray-500">{user.email}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center space-x-2">
+                                <Badge variant={
+                                  user.user_type === 'admin' ? 'destructive' :
+                                  user.user_type === 'company' ? 'secondary' : 'default'
+                                } className="capitalize">{user.user_type}</Badge>
+                                <Button variant="ghost" size="sm">
+                                  <Settings className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+
           <TabsContent value="projects">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <div>
-                  <CardTitle>{userType === 'company' ? 'Meus Projetos' : 'Meus Trabalhos'}</CardTitle>
-                  <CardDescription>{userType === 'company' ? 'Visualize e gerencie seus projetos.' : 'Projetos que você está trabalhando ou já concluiu.'}</CardDescription>
+                  <CardTitle>{userType === 'admin' ? 'Gerenciar Projetos' : (userType === 'company' ? 'Meus Projetos' : 'Meus Trabalhos')}</CardTitle>
+                  <CardDescription>{userType === 'admin' ? 'Visualize e gerencie todos os projetos da plataforma.' : (userType === 'company' ? 'Visualize e gerencie seus projetos.' : 'Projetos que você está trabalhando ou já concluiu.')}</CardDescription>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="relative">
@@ -711,10 +923,14 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                             <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
                           </CardContent>
                           <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
-                            <Badge variant={getStatusVariant(project.status)} className="capitalize">{project.status.replace('_', ' ')}</Badge>
+                            <Badge
+                              variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
+                              className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
+                            >
+                              {project.status.replace('_', ' ')}</Badge>
                             <div className="space-x-2">
                               {userType === 'company' && (
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-100" onClick={(e) => { e.preventDefault(); handleDeleteProject(project.id); }} disabled={deletingProjectId === project.id}>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-100" onClick={(e) => { e.preventDefault(); setProjectToDelete(project); }} disabled={deletingProjectId === project.id}>
                                   {deletingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash className="h-4 w-4" />}
                                 </Button>
                               )}
@@ -755,7 +971,11 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                               <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
                             </CardContent>
                             <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
-                              <Badge variant={getStatusVariant(project.status)} className="capitalize">{project.status.replace('_', ' ')}</Badge>
+                              <Badge
+                                variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
+                                className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
+                              >
+                                {project.status.replace('_', ' ')}</Badge>
                               <Button variant="default" size="sm">Ver Detalhes</Button>
                             </CardFooter>
                           </Card>
@@ -796,8 +1016,34 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
-                            <Badge variant={getStatusVariant(proposal.status)} className="capitalize">{proposal.status}</Badge>
-                            <Button variant="outline" size="sm">Ver Proposta</Button>
+                            <Badge
+                              variant={proposal.status === 'accepted' ? 'default' : getStatusVariant(proposal.status)}
+                              className={`capitalize ${
+                                proposal.status === 'accepted' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : 
+                                proposal.status === 'pending' ? 'bg-gray-500 hover:bg-gray-600 text-white border-transparent' :
+                                ''
+                              }`}
+                            >
+                              {proposal.status}
+                            </Badge>
+                            {userType === 'company' && proposal.status === 'pending' && (
+                              <>
+                                <Button variant="destructive" size="sm" onClick={() => handleUpdateProposalStatus(proposal.id, 'rejected')} disabled={updatingProposalId === proposal.id}>
+                                  {updatingProposalId === proposal.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Rejeitar'}
+                                </Button>
+                                <Button variant="default" size="sm" onClick={() => handleUpdateProposalStatus(proposal.id, 'accepted')} disabled={updatingProposalId === proposal.id}>
+                                  {updatingProposalId === proposal.id ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Aceitar'}
+                                </Button>
+                              </>
+                            )}
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => setViewingProposal(proposal)}
+                            >
+                              <Eye className="h-4 w-4 mr-2" />
+                              Ver
+                            </Button>
                           </div>
                         </CardContent>
                       </Card>

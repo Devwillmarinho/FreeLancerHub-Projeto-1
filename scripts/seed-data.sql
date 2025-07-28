@@ -14,6 +14,7 @@ DECLARE
     company2_id uuid;
     freelancer1_id uuid;
     freelancer2_id uuid;
+    admin_user_id uuid;
     project1_id uuid;
     project2_id uuid;
     project3_id uuid;
@@ -24,11 +25,16 @@ BEGIN
     SELECT id INTO company2_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'empresa2@test.com');
     SELECT id INTO freelancer1_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'freelancer1@test.com');
     SELECT id INTO freelancer2_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'freelancer2@test.com');
+    SELECT id INTO admin_user_id FROM public.profiles WHERE id = (SELECT id FROM auth.users WHERE email = 'admin@test.com');
 
     -- Verificar se os usuários foram encontrados
-    IF company1_id IS NULL OR company2_id IS NULL OR freelancer1_id IS NULL OR freelancer2_id IS NULL THEN
-        RAISE EXCEPTION 'Um ou mais usuários de teste não foram encontrados. Crie-os primeiro.';
+    IF company1_id IS NULL OR company2_id IS NULL OR freelancer1_id IS NULL OR freelancer2_id IS NULL OR admin_user_id IS NULL THEN
+        RAISE EXCEPTION 'Um ou mais usuários de teste (incluindo admin@test.com) não foram encontrados. Crie-os primeiro.';
     END IF;
+
+    -- Definir o tipo do usuário admin
+    UPDATE public.profiles SET user_type = 'admin'
+    WHERE id = admin_user_id;
 
     -- Atualizar skills dos freelancers
     UPDATE public.profiles SET skills = ARRAY['JavaScript', 'React', 'Node.js', 'PostgreSQL'] 
