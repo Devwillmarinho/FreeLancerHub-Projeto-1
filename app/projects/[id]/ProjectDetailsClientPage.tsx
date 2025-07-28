@@ -1,5 +1,6 @@
 "use client";
 
+import { useTheme } from "next-themes";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
@@ -12,7 +13,7 @@ import { useToast } from "@/components/ui/use-toast";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { ArrowLeft, Calendar, DollarSign, Loader2, Send, CheckCircle, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Calendar, DollarSign, Loader2, Send, CheckCircle, AlertTriangle, Sun, Moon } from "lucide-react";
 import { Database } from "@/types/supabase";
 
 type Project = Database['public']['Tables']['projects']['Row'] & {
@@ -31,6 +32,7 @@ export default function ProjectDetailsClientPage({ project, userProfile, hasExis
   const router = useRouter();
   const supabase = createClientComponentClient<Database>();
   const { toast } = useToast();
+  const { setTheme, theme } = useTheme();
 
   const [proposalMessage, setProposalMessage] = useState("");
   const [proposedBudget, setProposedBudget] = useState("");
@@ -92,12 +94,23 @@ export default function ProjectDetailsClientPage({ project, userProfile, hasExis
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto max-w-4xl px-4 py-8">
-        <Button variant="ghost" onClick={() => router.back()} className="mb-4">
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          Voltar
-        </Button>
+    <div className="min-h-screen bg-background">
+      <div className="container mx-auto max-w-4xl px-4 py-6">
+        <div className="flex justify-between items-center mb-4">
+          <Button variant="ghost" onClick={() => router.back()}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Voltar
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          >
+            <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+            <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+            <span className="sr-only">Alternar tema</span>
+          </Button>
+        </div>
 
         <Card>
           <CardHeader>
@@ -111,31 +124,31 @@ export default function ProjectDetailsClientPage({ project, userProfile, hasExis
               </div>
               <Badge
                 variant={getStatusVariant(project.status)}
-                className={`capitalize text-lg px-4 py-1 ${project.status === 'open' ? 'bg-green-600 text-white' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 text-white' : ''} ${project.status === 'completed' ? 'bg-slate-500 text-white' : ''}`}
+                className={`capitalize text-lg px-4 py-1 ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white' : ''}`}
               >
                 {project.status.replace('_', ' ')}</Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-center">
-              <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-500">Orçamento</p><p className="text-lg font-semibold flex items-center justify-center"><DollarSign className="h-5 w-5 mr-1" /> {project.budget.toLocaleString('pt-BR')}</p></div>
-              <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-500">Prazo</p><p className="text-lg font-semibold flex items-center justify-center"><Calendar className="h-5 w-5 mr-1" /> {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</p></div>
-              <div className="p-4 bg-gray-100 rounded-lg"><p className="text-sm text-gray-500">Habilidades</p><div className="flex flex-wrap gap-1 justify-center mt-1">{project.required_skills.map(skill => <Badge key={skill} variant="secondary">{skill}</Badge>)}</div></div>
+              <div className="p-4 bg-muted/50 rounded-lg"><p className="text-sm text-muted-foreground">Orçamento</p><p className="text-lg font-semibold flex items-center justify-center"><DollarSign className="h-5 w-5 mr-1" /> {project.budget.toLocaleString('pt-BR')}</p></div>
+              <div className="p-4 bg-muted/50 rounded-lg"><p className="text-sm text-muted-foreground">Prazo</p><p className="text-lg font-semibold flex items-center justify-center"><Calendar className="h-5 w-5 mr-1" /> {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</p></div>
+              <div className="p-4 bg-muted/50 rounded-lg"><p className="text-sm text-muted-foreground">Habilidades</p><div className="flex flex-wrap gap-1 justify-center mt-1">{project.required_skills.map(skill => <Badge key={skill} variant="secondary">{skill}</Badge>)}</div></div>
             </div>
 
             <div>
               <h3 className="text-xl font-semibold mb-2">Descrição do Projeto</h3>
-              <p className="text-gray-700 whitespace-pre-wrap">{project.description}</p>
+              <p className="text-muted-foreground whitespace-pre-wrap">{project.description}</p>
             </div>
 
             {/* --- LÓGICA PRINCIPAL AQUI --- */}
             {canSubmitProposal && (
               <div className="border-t pt-6">
                 {isSubmitted ? (
-                  <div className="text-center p-6 bg-green-50 border border-green-200 rounded-lg">
+                  <div className="text-center p-6 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-500/30 rounded-lg">
                     <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold text-green-800">Proposta Enviada!</h3>
-                    <p className="text-gray-600 mt-2">A empresa foi notificada. Você pode acompanhar o status na sua área de "Minhas Propostas".</p>
+                    <h3 className="text-xl font-semibold text-green-800 dark:text-green-300">Proposta Enviada!</h3>
+                    <p className="text-muted-foreground mt-2">A empresa foi notificada. Você pode acompanhar o status na sua área de "Minhas Propostas".</p>
                   </div>
                 ) : (
                   <form onSubmit={handleSubmitProposal} className="space-y-4">
@@ -173,16 +186,16 @@ export default function ProjectDetailsClientPage({ project, userProfile, hasExis
 
             {/* Mensagem para empresas ou freelancers que não podem se candidatar */}
             {userProfile?.user_type === 'company' && (
-                <div className="text-center p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-blue-800">Esta é a visualização do seu projeto. As propostas recebidas aparecerão no seu dashboard.</p>
+                <div className="text-center p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-500/30 rounded-lg">
+                    <p className="text-blue-800 dark:text-blue-300">Esta é a visualização do seu projeto. As propostas recebidas aparecerão no seu dashboard.</p>
                 </div>
             )}
 
             {project.status !== 'open' && userProfile?.user_type === 'freelancer' && !isAssignedFreelancer && (
-                 <Alert variant="default" className="bg-yellow-50 border-yellow-200 text-yellow-800">
-                    <AlertTriangle className="h-4 w-4 !text-yellow-800" />
+                 <Alert variant="default" className="bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-500/30 text-yellow-800 dark:text-yellow-300">
+                    <AlertTriangle className="h-4 w-4 !text-yellow-800 dark:!text-yellow-300" />
                     <AlertTitle>Propostas Encerradas</AlertTitle>
-                    <AlertDescription>
+                    <AlertDescription className="text-yellow-700 dark:text-yellow-400">
                       Este projeto não está mais aceitando novas propostas, pois já se encontra {project.status === 'in_progress' ? 'em andamento' : 'finalizado'}.
                     </AlertDescription>
                   </Alert>

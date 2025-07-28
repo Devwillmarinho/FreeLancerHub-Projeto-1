@@ -1,31 +1,17 @@
-import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
+import { Inter as FontSans } from "next/font/google";
+import { cn } from "@/lib/utils";
+import { ThemeProvider } from "./theme-provider";
 import { Toaster } from "@/components/ui/toaster";
-import { SupportChatWidget } from "@/components/ui/SupportChatWidget";
 
-const inter = Inter({ subsets: ["latin"] });
+const fontSans = FontSans({ subsets: ["latin"], variable: "--font-sans" });
 
-export const metadata: Metadata = {
-  title: "FreelancerHub",
-  description: "Created with DevWillMarinho",
-  generator: "DevWillMarinho",
-  icons: {
-    icon: "/icon2.png",
-  },
-};
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR">
-      <body className={inter.className}>
-        {children}
+    <html lang="pt-BR" suppressHydrationWarning>
+      <body className={cn("min-h-screen bg-background font-sans antialiased", fontSans.variable)}>
+        <ThemeProvider>{children}</ThemeProvider>
         <Toaster />
-        <SupportChatWidget />
       </body>
     </html>
   );

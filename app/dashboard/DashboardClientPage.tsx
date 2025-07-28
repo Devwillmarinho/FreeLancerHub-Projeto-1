@@ -1,5 +1,6 @@
 "use client";
 
+import { useTheme } from "next-themes";
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation"; // Corrigido para importação correta
 import { Button } from "@/components/ui/button"; // Corrigido: 'button' em minúsculo
@@ -65,6 +66,8 @@ import {
   Search,
   Loader2,
   CheckCircle,
+  Moon,
+  Sun,
 } from "lucide-react";
 import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
@@ -138,6 +141,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
   const supabase = createClientComponentClient();
   const router = useRouter();
   const { toast } = useToast();
+  const { setTheme, theme } = useTheme();
 
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const [showProfileDialog, setShowProfileDialog] = useState(false);
@@ -581,7 +585,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-background">
       {/* Diálogo para Ver Proposta */}
       <Dialog open={!!viewingProposal} onOpenChange={(isOpen) => !isOpen && setViewingProposal(null)}>
         <DialogContent className="max-w-lg">
@@ -594,13 +598,13 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
           {viewingProposal && (
             <div className="space-y-4 py-4">
               <div>
-                <h4 className="font-semibold text-gray-800 mb-2">Mensagem do Freelancer:</h4>
-                <div className="p-4 bg-gray-100 rounded-md border">
-                  <p className="text-gray-700 whitespace-pre-wrap">{viewingProposal.message}</p>
+                <h4 className="font-semibold text-foreground mb-2">Mensagem do Freelancer:</h4>
+                <div className="p-4 bg-muted rounded-md border">
+                  <p className="text-muted-foreground whitespace-pre-wrap">{viewingProposal.message}</p>
                 </div>
               </div>
               <div>
-                <h4 className="font-semibold text-gray-800 mb-2">Orçamento Proposto:</h4>
+                <h4 className="font-semibold text-foreground mb-2">Orçamento Proposto:</h4>
                 <p className="text-lg font-bold text-green-600">
                   R$ {viewingProposal.proposed_budget.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
@@ -637,28 +641,39 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       </AlertDialog>
 
       {/* Header */}
-      <header className="bg-white border-b shadow-sm">
+      <header className="bg-card border-b shadow-sm sticky top-0 z-40">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center">
             <div className="flex items-center space-x-4">
               <div className="flex items-center space-x-3">
                 <Briefcase className="h-8 w-8 text-blue-600" />
-                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:text-transparent">
                   FreelanceHub
                 </h1>
               </div>
-              <div className="hidden md:block h-6 w-px bg-gray-300"></div>
+              <div className="hidden md:block h-6 w-px bg-border"></div>
               <div className="hidden md:block">
-                <h2 className="text-xl font-semibold text-gray-900">
+                <h2 className="text-xl font-semibold text-foreground">
                   Dashboard
                 </h2>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-muted-foreground">
                   Bem-vindo(a) de volta, {profile?.full_name || profile?.company_name || '...'}!
                 </p>
               </div>
             </div>
 
             <div className="flex items-center space-x-4">
+              {/* Botão de Tema */}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              >
+                <Sun className="h-[1.2rem] w-[1.2rem] rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
+                <Moon className="absolute h-[1.2rem] w-[1.2rem] rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+                <span className="sr-only">Alternar tema</span>
+              </Button>
+
               {/* Botão de Perfil e Diálogo */}
               <Dialog
                 open={showProfileDialog}
@@ -751,11 +766,11 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                     <stat.icon className={`h-6 w-6 ${stat.color}`} />
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-bold text-gray-900">{stat.value}</p>
-                    <p className="text-sm font-medium text-gray-600">{stat.title}</p>
+                    <p className="text-2xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-sm font-medium text-muted-foreground">{stat.title}</p>
                   </div>
                 </div>
-                <p className="text-xs text-gray-500">{stat.change}</p>
+                <p className="text-xs text-muted-foreground">{stat.change}</p>
               </CardContent>
             </Card>
           ))}
@@ -843,9 +858,9 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                     <div className="space-y-4">
                       <h3 className="text-lg font-medium">Lista de Usuários ({allUsers.length})</h3>
                       <div className="border rounded-md">
-                        <div className="max-h-[400px] overflow-y-auto">
+                        <div className="max-h-[400px] overflow-y-auto ">
                           {allUsers.map((user) => (
-                            <div key={user.id} className="flex items-center justify-between p-3 border-b last:border-b-0 hover:bg-gray-50">
+                            <div key={user.id} className="flex items-center justify-between p-3 border-b last:border-b-0 hover:bg-muted/50">
                               <div className="flex items-center space-x-3">
                                 <Avatar className="h-9 w-9">
                                   <AvatarImage src={user.avatar_url ?? undefined} />
@@ -853,7 +868,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                                 </Avatar>
                                 <div>
                                   <p className="font-semibold">{user.full_name || user.company_name}</p>
-                                  <p className="text-sm text-gray-500">{user.email}</p>
+                                  <p className="text-sm text-muted-foreground">{user.email}</p>
                                 </div>
                               </div>
                               <div className="flex items-center space-x-2">
@@ -919,10 +934,10 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                             <CardTitle className="text-lg">{project.title}</CardTitle>
                           </CardHeader>
                           <CardContent className="flex-grow space-y-2 text-sm">
-                            <div className="flex items-center text-gray-600"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
-                            <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
+                            <div className="flex items-center text-muted-foreground"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
+                            <div className="flex items-center text-muted-foreground"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
                           </CardContent>
-                          <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
+                          <CardFooter className="flex justify-between items-center p-4 bg-muted/50">
                             <Badge
                               variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
                               className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
@@ -967,10 +982,10 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                               <CardTitle className="text-lg">{project.title}</CardTitle>
                             </CardHeader>
                             <CardContent className="flex-grow space-y-2 text-sm">
-                              <div className="flex items-center text-gray-600"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
-                              <div className="flex items-center text-gray-600"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
+                              <div className="flex items-center text-muted-foreground"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
+                              <div className="flex items-center text-muted-foreground"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
                             </CardContent>
-                            <CardFooter className="flex justify-between items-center p-4 bg-gray-50">
+                            <CardFooter className="flex justify-between items-center p-4 bg-muted/50">
                               <Badge
                                 variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
                                 className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
@@ -1011,8 +1026,8 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                               <AvatarFallback>{proposal.freelancer.full_name.substring(0, 2).toUpperCase()}</AvatarFallback>
                             </Avatar>
                             <div>
-                              <p className="font-semibold text-blue-700">{proposal.freelancer.full_name}</p>
-                              <p className="text-sm text-gray-600">enviou uma proposta para <span className="font-medium">{proposal.project.title}</span></p>
+                              <p className="font-semibold text-primary">{proposal.freelancer.full_name}</p>
+                              <p className="text-sm text-muted-foreground">enviou uma proposta para <span className="font-medium text-foreground">{proposal.project.title}</span></p>
                             </div>
                           </div>
                           <div className="flex items-center space-x-2">
