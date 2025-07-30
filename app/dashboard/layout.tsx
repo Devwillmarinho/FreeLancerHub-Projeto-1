@@ -1,10 +1,20 @@
-// Este arquivo deve ser um Server Component simples que apenas repassa os filhos.
-// A proteção da rota é feita pelo middleware.ts e é suficiente.
+"use client"; // O ThemeProvider requer que este seja um Client Component.
+
+import { ThemeProvider } from "@/app/theme-provider";
+
 export default function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  return <>{children}</>;
+  return (
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="system"
+      enableSystem
+      disableTransitionOnChange
+    >
+      {children}
+    </ThemeProvider>
+  );
 }
-

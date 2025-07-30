@@ -73,60 +73,12 @@ import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
 import { Session } from "@supabase/supabase-js";
 import { useToast } from "@/components/ui/use-toast";
-
-// Tipos de dados (podem ser movidos para um arquivo separado)
-interface DashboardProject {
-  id: string;
-  title: string;
-  budget: number;
-  deadline: string | null;
-  status: string;
-  freelancer_id: string | null; // Adicionado para filtragem do freelancer
-  company: {
-    id: string;
-    full_name: string | null;
-    company_name: string | null;
-    avatar_url: string | null;
-  } | null;
-}
-
-interface DashboardProposal {
-  id: string;
-  project: { title: string };
-  freelancer: { full_name: string };
-  status: string;
-  message: string;
-  proposed_budget: number;
-}
-
-interface DashboardContract {
-  id: string;
-  project: { title: string };
-  freelancer: { full_name: string };
-  status: string;
-  budget: number;
-}
-
-interface AdminUser {
-  id: string;
-  full_name: string | null;
-  company_name: string | null;
-  email: string;
-  user_type: 'freelancer' | 'company' | 'admin';
-  avatar_url: string | null;
-}
+import { DashboardProject, DashboardProposal, DashboardContract, AdminUser, UserProfile } from "@/types";
 
 // Props que o componente receberá do "porteiro" (page.tsx)
 interface DashboardClientPageProps {
   userEmail: string | undefined;
-  profile: {
-    id: string;
-    full_name?: string;
-    company_name?: string;
-    avatar_url?: string;
-    bio?: string | null;
-    skills?: string[] | null;
-  };
+  profile: UserProfile;
   userType: 'freelancer' | 'company' | 'admin' | null;
 }
 
