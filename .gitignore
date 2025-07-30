@@ -47,3 +47,5 @@ ehthumbs.db
 # Prisma
 /lib/generated/prisma
 .env
+
+.vercel
