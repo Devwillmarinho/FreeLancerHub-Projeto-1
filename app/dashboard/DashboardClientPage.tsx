@@ -282,7 +282,7 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         let projectsQuery = supabase
           .from('projects')
           .select(`
-            id, title, budget, status, freelancer_id,
+            id, title, budget, deadline, status, freelancer_id,
             company:profiles!company_id(id, full_name, company_name, avatar_url)
           `)
           .order('created_at', { ascending: false });
@@ -321,13 +321,17 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         setProposals(proposalsData);
         setContracts(contractsData || []);
 
+        // Adiciona uma verificação para garantir que cada projeto no array é um objeto válido,
+        // filtrando qualquer item que seja `null` ou `undefined`.
+        const validProjects = (projectsData || []).filter(p => p);
+
         if (userType === 'freelancer') {
           // Para freelancers, separamos os projetos abertos dos que já são dele.
-          setMyGigs(projectsData.filter(p => p.freelancer_id === profile.id));
-          setBrowseProjects(projectsData.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
+          setMyGigs(validProjects.filter(p => p.freelancer_id === profile.id));
+          setBrowseProjects(validProjects.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
         } else {
           // Para empresas, a RLS já filtrou. Todos os projetos recebidos são dela.
-          setMyGigs(projectsData); // Para empresas, a RLS já filtrou
+          setMyGigs(validProjects);
           setBrowseProjects([]); // Empresas não exploram projetos
         }
 
