@@ -1,7 +1,9 @@
+export const dynamic = 'force-dynamic';
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { requireUserType } from "@/middleware/auth";
 import { NextRequestWithUser } from "@/types";
+
 
 // Rota para administradores listarem todos os usuários
 export async function GET(request: NextRequestWithUser) {

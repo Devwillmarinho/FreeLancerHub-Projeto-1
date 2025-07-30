@@ -1,7 +1,9 @@
+export const dynamic = 'force-dynamic';
 import { NextResponse } from "next/server"
 import { supabaseAdmin } from "@/lib/supabase"
 import { authMiddleware } from "@/middleware/auth"
 import { NextRequestWithUser } from "@/types"
+
 
 export async function GET(request: NextRequestWithUser) {
   const authResult = await authMiddleware(request)

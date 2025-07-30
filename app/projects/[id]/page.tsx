@@ -43,4 +43,3 @@ export default async function ProjectDetailsPage({ params }: PageProps) {
 
   return <ProjectDetailsClientPage project={project} userProfile={profile} hasExistingProposal={!!existingProposal} />;
 }
-
