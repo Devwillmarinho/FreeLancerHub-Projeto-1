@@ -68,6 +68,7 @@ import {
   CheckCircle,
   Moon,
   Sun,
+  Save,
 } from "lucide-react";
 import Link from "next/link";
 import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
@@ -129,8 +130,14 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
   const [updatingProposalId, setUpdatingProposalId] = useState<string | null>(null);
   const [viewingProposal, setViewingProposal] = useState<DashboardProposal | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<DashboardProject | null>(null);
+  const [reviewingContract, setReviewingContract] = useState<DashboardContract | null>(null);
+  const [reviewData, setReviewData] = useState({ rating: 0, comment: "" });
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [reviewedContractIds, setReviewedContractIds] = useState<string[]>([]);
 
-
+  const [updatingContractId, setUpdatingContractId] = useState<string | null>(null);
+  const [receivedReviews, setReceivedReviews] = useState<any[]>([]);
+  const [isLoadingReviews, setIsLoadingReviews] = useState(false);
   const stats = [
     {
       title: "Projetos Ativos",
@@ -213,6 +220,25 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     return 'destructive';
   }
 
+  // Busca as avaliações quando o diálogo do perfil é aberto
+  useEffect(() => {
+    if (showProfileDialog && profile?.id) {
+      const fetchReviews = async () => {
+        setIsLoadingReviews(true);
+        try {
+          const response = await fetch(`/api/reviews?user_id=${profile.id}`);
+          if (!response.ok) throw new Error("Falha ao buscar avaliações.");
+          const data = await response.json();
+          setReceivedReviews(data.data || []);
+        } catch (error: any) {
+          toast({ title: "Erro", description: error.message, variant: "destructive" });
+        } finally {
+          setIsLoadingReviews(false);
+        }
+      };
+      fetchReviews();
+    }
+  }, [showProfileDialog, profile?.id, toast]);
   // A busca de dados agora é simplificada, pois as políticas de segurança (RLS)
   // do Supabase já filtram os dados no backend.
   useEffect(() => {
@@ -260,6 +286,17 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         if (!proposalsResponse.ok) {
           throw new Error('Falha ao buscar propostas.');
         }
+
+        // Busca as avaliações já feitas pelo usuário para não mostrar o botão novamente
+        const { data: reviewsData } = await supabase
+          .from('reviews')
+          .select('contract_id')
+          .eq('reviewer_id', profile.id);
+
+        if (reviewsData) {
+          setReviewedContractIds(reviewsData.map(r => r.contract_id));
+        }
+
         const proposalsPayload = await proposalsResponse.json();
         const proposalsData = proposalsPayload.data || [];
 
@@ -405,6 +442,58 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     }
   };
 
+  const handleSendReview = async () => {
+    if (!reviewingContract) return;
+    if (reviewData.rating === 0) {
+      toast({ title: "Avaliação incompleta", description: "Por favor, selecione uma nota de 1 a 5 estrelas.", variant: "destructive" });
+      return;
+    }
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({ title: "Não autenticado", variant: "destructive" });
+      return;
+    }
+
+    setIsSubmittingReview(true);
+    try {
+      const response = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          contract_id: reviewingContract.id,
+          // Se for empresa, avalia o freelancer. Se for freelancer, avalia a empresa.
+          reviewed_id: userType === 'company' ? reviewingContract.freelancer_id : reviewingContract.company_id,
+          rating: reviewData.rating,
+          comment: reviewData.comment,
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Falha ao enviar avaliação.');
+      }
+
+      toast({ title: "Sucesso!", description: "Sua avaliação foi enviada." });
+      // Adiciona o ID do contrato à lista de já avaliados para esconder o botão
+      setReviewedContractIds(prev => [...prev, reviewingContract.id]);
+      setReviewingContract(null); // Fecha o diálogo
+      setReviewData({ rating: 0, comment: "" }); // Reseta o formulário
+
+    } catch (error: any) {
+      toast({
+        title: "Erro ao avaliar",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmittingReview(false);
+    }
+  };
+
   const handleSignOut = async () => {
     await supabase.auth.signOut();
     router.push('/auth/login');
@@ -540,6 +629,58 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
     }
   };
 
+  const handleCompleteContract = async (contractId: string) => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast({ title: "Não autenticado", variant: "destructive" });
+      return;
+    }
+
+    setUpdatingContractId(contractId);
+    try {
+      const response = await fetch(`/api/contracts/${contractId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ is_completed: true }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || 'Falha ao finalizar o contrato.');
+      }
+
+      // Atualiza o contrato no estado local para refletir a mudança imediatamente
+      setContracts(prev => prev.map(c => c.id === contractId ? { ...c, is_completed: true } : c));
+      // Atualiza também o status do projeto na lista de 'myGigs'
+      const completedContract = contracts.find(c => c.id === contractId);
+      if (completedContract) setMyGigs(prev => prev.map(p => p.id === completedContract.project_id ? { ...p, status: 'completed' } : p));
+      toast({ title: "Sucesso!", description: "Contrato marcado como concluído." });
+
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: 'destructive' });
+    } finally {
+      setUpdatingContractId(null);
+    }
+  };
+
+  // Componente para o rating de estrelas
+  const StarRating = ({ rating, setRating }: { rating: number, setRating: (r: number) => void }) => (
+    <div className="flex items-center gap-2">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star
+          key={star}
+          className={`h-8 w-8 cursor-pointer transition-colors ${
+            rating >= star ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'
+          }`}
+          onClick={() => setRating(star)}
+        />
+      ))}
+    </div>
+  );
+
   return (
     <div className="min-h-screen bg-background">
       {/* Diálogo para Ver Proposta */}
@@ -596,6 +737,39 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Diálogo para Avaliar Contrato */}
+      <Dialog open={!!reviewingContract} onOpenChange={(isOpen) => !isOpen && setReviewingContract(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Avaliar Trabalho Concluído</DialogTitle>
+            <DialogDescription>
+              Deixe seu feedback sobre o trabalho realizado no projeto <span className="font-semibold">{reviewingContract?.project.title}</span>.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-6 py-4">
+            <div className="flex flex-col items-center space-y-2">
+              <Label>Sua nota (de 1 a 5 estrelas)</Label>
+              <StarRating rating={reviewData.rating} setRating={(r) => setReviewData({...reviewData, rating: r})} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="reviewComment">Comentário (opcional)</Label>
+              <Textarea
+                id="reviewComment"
+                placeholder="Descreva sua experiência..."
+                value={reviewData.comment}
+                onChange={(e) => setReviewData({ ...reviewData, comment: e.target.value })}
+              />
+            </div>
+            <div className="flex justify-end pt-4">
+              <Button onClick={handleSendReview} disabled={isSubmittingReview}>
+                {isSubmittingReview ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
+                {isSubmittingReview ? 'Enviando...' : 'Enviar Avaliação'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <header className="bg-card border-b shadow-sm sticky top-0 z-40">
         <div className="container mx-auto px-4 py-4">
@@ -642,68 +816,86 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                     className="flex items-center space-x-2"
                   >
                     <Avatar className="h-8 w-8">
-                      <AvatarImage src={profile?.avatar_url} />
+                      <AvatarImage src={profile?.avatar_url ?? undefined} />
                       <AvatarFallback>{(profile?.full_name || profile?.company_name || 'U').substring(0, 2).toUpperCase()}</AvatarFallback>
                     </Avatar>
                     <span className="hidden md:block">{profile?.full_name || profile?.company_name}</span>
                   </Button>
                 </DialogTrigger>
-                <DialogContent className="max-w-md">
-                  <DialogHeader>
-                    <DialogTitle>Perfil do Usuário</DialogTitle>
-                    <DialogDescription>
-                      Gerencie suas informações e configurações.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleProfileUpdate} className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="fullName">Nome Completo</Label>
-                      <Input 
-                        id="fullName" 
-                        value={editableProfile.full_name}
-                        onChange={(e) => setEditableProfile({...editableProfile, full_name: e.target.value})}
-                      />
-                    </div>
-                    {userType === 'company' && (
-                      <div className="space-y-2">
-                        <Label htmlFor="companyName">Nome da Empresa</Label>
-                        <Input 
-                          id="companyName" 
-                          value={editableProfile.company_name || ''}
-                          onChange={(e) => setEditableProfile({...editableProfile, company_name: e.target.value})}
-                        />
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <Label htmlFor="bio">Bio / Descrição</Label>
-                      <Textarea 
-                        id="bio" 
-                        value={editableProfile.bio || ''}
-                        onChange={(e) => setEditableProfile({...editableProfile, bio: e.target.value})}
-                        placeholder={userType === 'company' ? 'Descreva sua empresa...' : 'Fale sobre você...'}
-                      />
-                    </div>
-                    {/* A edição de skills pode ser adicionada aqui no futuro */}
-                    <div className="flex justify-between items-center pt-4">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="text-red-600 hover:text-red-700"
-                        onClick={handleSignOut}
-                      >
-                        <LogOut className="mr-2 h-4 w-4" />
-                        Sair
-                      </Button>
-                      <Button type="submit" disabled={isUpdatingProfile}>
-                        {isUpdatingProfile ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <CheckCircle className="mr-2 h-4 w-4" />
+                <DialogContent className="max-w-2xl">
+                  <Tabs defaultValue="info" className="w-full">
+                    <DialogHeader className="mb-4">
+                      <DialogTitle>Perfil do Usuário</DialogTitle>
+                      <DialogDescription>
+                        Gerencie suas informações e veja suas avaliações.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="info">Informações</TabsTrigger>
+                      <TabsTrigger value="reviews">Avaliações Recebidas</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="info">
+                      <form onSubmit={handleProfileUpdate} className="space-y-4 pt-4">
+                        <div className="space-y-2">
+                          <Label htmlFor="fullName">Nome Completo</Label>
+                          <Input
+                            id="fullName"
+                            value={editableProfile.full_name}
+                            onChange={(e) => setEditableProfile({ ...editableProfile, full_name: e.target.value })}
+                          />
+                        </div>
+                        {userType === 'company' && (
+                          <div className="space-y-2">
+                            <Label htmlFor="companyName">Nome da Empresa</Label>
+                            <Input
+                              id="companyName"
+                              value={editableProfile.company_name || ''}
+                              onChange={(e) => setEditableProfile({ ...editableProfile, company_name: e.target.value })}
+                            />
+                          </div>
                         )}
-                        {isUpdatingProfile ? 'Salvando...' : 'Salvar Alterações'}
-                      </Button>
-                    </div>
-                  </form>
+                        <div className="space-y-2">
+                          <Label htmlFor="bio">Bio / Descrição</Label>
+                          <Textarea
+                            id="bio"
+                            value={editableProfile.bio || ''}
+                            onChange={(e) => setEditableProfile({ ...editableProfile, bio: e.target.value })}
+                            placeholder={userType === 'company' ? 'Descreva sua empresa...' : 'Fale sobre você...'}
+                          />
+                        </div>
+                        <div className="flex justify-between items-center pt-4">
+                          <Button type="button" variant="outline" className="text-red-600 hover:text-red-700" onClick={handleSignOut}>
+                            <LogOut className="mr-2 h-4 w-4" /> Sair
+                          </Button>
+                          <Button type="submit" disabled={isUpdatingProfile}>
+                            {isUpdatingProfile ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
+                            {isUpdatingProfile ? 'Salvando...' : 'Salvar Alterações'}
+                          </Button>
+                        </div>
+                      </form>
+                    </TabsContent>
+                    <TabsContent value="reviews">
+                      <div className="pt-4 max-h-[400px] overflow-y-auto pr-2">
+                        {isLoadingReviews ? (
+                          <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                        ) : receivedReviews.length > 0 ? (
+                          <div className="space-y-4">
+                            {receivedReviews.map(review => (
+                              <div key={review.id} className="p-4 border rounded-md bg-muted/50">
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="font-semibold">{review.reviewer.full_name}</p>
+                                  <div className="flex items-center gap-1">{Array.from({ length: 5 }).map((_, i) => <Star key={i} className={`h-4 w-4 ${i < review.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'}`} />)}</div>
+                                </div>
+                                <p className="text-sm text-muted-foreground">{review.comment}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-center text-muted-foreground py-8">Nenhuma avaliação recebida ainda.</p>
+                        )}
+                      </div>
+                    </TabsContent>
+                  </Tabs>
                 </DialogContent>
               </Dialog>
             </div>
@@ -883,34 +1075,49 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                   <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
                 ) : myGigs.length > 0 ? (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {myGigs.map((project) => (
-                      <Link href={`/projects/${project.id}`} key={project.id} className="block">
-                        <Card className="flex flex-col justify-between hover:shadow-md transition-shadow duration-300 h-full">
-                          <CardHeader>
-                            <CardTitle className="text-lg">{project.title}</CardTitle>
-                          </CardHeader>
-                          <CardContent className="flex-grow space-y-2 text-sm">
-                            <div className="flex items-center text-muted-foreground"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
-                            <div className="flex items-center text-muted-foreground"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
-                          </CardContent>
+                    {myGigs.map((project) => {
+                      const contract = contracts.find(c => c.project_id === project.id);
+                      return (
+                        <Card key={project.id} className="flex flex-col justify-between hover:shadow-md transition-shadow duration-300 h-full">
+                          <div className="flex-grow">
+                            <CardHeader>
+                              <Link href={`/projects/${project.id}`}>
+                                <CardTitle className="text-lg hover:underline">{project.title}</CardTitle>
+                              </Link>
+                            </CardHeader>
+                            <CardContent className="space-y-2 text-sm">
+                              <div className="flex items-center text-muted-foreground"><DollarSign className="h-4 w-4 mr-2" /><span>Orçamento: R$ {project.budget.toLocaleString('pt-BR')}</span></div>
+                              <div className="flex items-center text-muted-foreground"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
+                            </CardContent>
+                          </div>
                           <CardFooter className="flex justify-between items-center p-4 bg-muted/50">
                             <Badge
                               variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
                               className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
                             >
-                              {project.status.replace('_', ' ')}</Badge>
-                            <div className="space-x-2">
+                              {project.status.replace('_', ' ')}
+                            </Badge>
+                            <div className="flex items-center space-x-2">
                               {userType === 'company' && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-100" onClick={(e) => { e.preventDefault(); setProjectToDelete(project); }} disabled={deletingProjectId === project.id}>
                                   {deletingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash className="h-4 w-4" />}
                                 </Button>
                               )}
-                              <Button variant="ghost" size="icon" className="h-8 w-8"><Eye className="h-4 w-4" /></Button>
+                              {userType === 'freelancer' && project.status === 'in_progress' && contract && !contract.is_completed && (
+                                <Button variant="default" size="sm" onClick={(e) => { e.preventDefault(); handleCompleteContract(contract.id); }} disabled={updatingContractId === contract.id}>
+                                  {updatingContractId === contract.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Concluir
+                                </Button>
+                              )}
+                              {contract?.is_completed && !reviewedContractIds.includes(contract.id) && (
+                                <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); setReviewingContract(contract); }}>
+                                  <Star className="mr-2 h-4 w-4" /> Avaliar
+                                </Button>
+                              )}
                             </div>
                           </CardFooter>
                         </Card>
-                      </Link>
-                    ))}
+                      )
+                    })}
                   </div>
                 ) : (
                   <p>Nenhum projeto encontrado.</p>
@@ -1046,7 +1253,40 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                 <CardDescription>Gerencie seus contratos e pagamentos.</CardDescription>
               </CardHeader>
               <CardContent>
-                <p>Funcionalidade de contratos em breve.</p>
+                {isLoadingContracts ? (
+                  <div className="flex justify-center items-center h-40"><Loader2 className="h-8 w-8 animate-spin" /></div>
+                ) : contracts.length > 0 ? (
+                  <div className="space-y-4">
+                    {contracts.map((contract) => (
+                      <Card key={contract.id}>
+                        <CardContent className="p-4 flex items-center justify-between">
+                          <div className="space-y-1">
+                            <p className="font-semibold text-primary">{contract.project.title}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {userType === 'company' ? `Freelancer: ${contract.freelancer.full_name}` : `Empresa: ${contract.company.company_name}`}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              Valor: R$ {contract.budget.toLocaleString('pt-BR')}
+                            </p>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <Badge variant={contract.is_completed ? 'default' : 'secondary'} className={contract.is_completed ? 'bg-green-600' : ''}>
+                              {contract.is_completed ? 'Concluído' : 'Em Andamento'}
+                            </Badge>
+                            {contract.is_completed && !reviewedContractIds.includes(contract.id) && (
+                              <Button variant="outline" size="sm" onClick={() => setReviewingContract(contract)}>
+                                <Star className="mr-2 h-4 w-4" />
+                                Avaliar
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <p>Nenhum contrato encontrado.</p>
+                )}
               </CardContent>
             </Card>
           </TabsContent>
