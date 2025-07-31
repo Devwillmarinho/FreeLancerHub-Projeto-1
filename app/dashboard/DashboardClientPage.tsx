@@ -71,8 +71,8 @@ import {
   Save,
 } from "lucide-react";
 import Link from "next/link";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
-import { Session } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
+import type { Session } from "@supabase/supabase-js";
 import { useToast } from "@/components/ui/use-toast";
 import { DashboardProject, DashboardProposal, DashboardContract, AdminUser, UserProfile } from "@/types";
 
@@ -91,7 +91,7 @@ type EditableProfile = {
 }
 
 export default function DashboardClientPage({ userEmail, profile, userType }: DashboardClientPageProps) {
-  const supabase = createClientComponentClient();
+  const supabase = createClient();
   const router = useRouter();
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
@@ -528,11 +528,15 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         throw new Error(errorData.error || 'Falha ao apagar o projeto.');
       }
 
-      // Remove o projeto da lista na interface
-      setMyGigs((prevGigs) => prevGigs.filter(p => p.id !== projectId));
-      setProjects((prevProjects) => prevProjects.filter(p => p.id !== projectId));
-      toast({ title: "Sucesso!", description: "Projeto apagado." });
+      // Atualização otimista da UI para feedback instantâneo
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setMyGigs((prev) => prev.filter((p) => p.id !== projectId));
+
       setProjectToDelete(null); // Fecha o diálogo de confirmação
+      toast({ title: "Sucesso!", description: "Projeto apagado." });
+
+      // Sincroniza com o servidor em segundo plano para garantir consistência.
+      router.refresh(); 
     } catch (error: any) {
       toast({ title: "Erro", description: error.message, variant: 'destructive' });
     } finally {

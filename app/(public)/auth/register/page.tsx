@@ -31,7 +31,7 @@ import {
   Users,
   ArrowLeft,
 } from "lucide-react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+ import { supabase } from "@/lib/supabaseClient"
 
 type UserType = "freelancer" | "company"
 
@@ -70,7 +70,6 @@ export default function RegisterPage() {
   const [emailValid, setEmailValid] = useState(false)
   const [agreedToTerms, setAgreedToTerms] = useState(false)
   const router = useRouter()
-  const supabase = createClientComponentClient()
 
   const validateEmail = (email: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/

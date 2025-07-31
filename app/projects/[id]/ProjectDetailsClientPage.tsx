@@ -3,7 +3,7 @@
 import { useTheme } from "next-themes";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,7 +30,7 @@ interface ProjectDetailsClientPageProps {
 
 export default function ProjectDetailsClientPage({ project, userProfile, hasExistingProposal }: ProjectDetailsClientPageProps) {
   const router = useRouter();
-  const supabase = createClientComponentClient<Database>();
+  const supabase = createClient();
   const { toast } = useToast();
   const { setTheme, theme } = useTheme();
 

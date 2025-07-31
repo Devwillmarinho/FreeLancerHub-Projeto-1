@@ -1,11 +1,10 @@
 import { NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createClient } from '@/lib/supabase/server';
 import type { NextRequestWithUser } from '@/types';
 
 export async function authMiddleware(request: NextRequestWithUser) {
   try {
-    const supabase = createRouteHandlerClient({ cookies });
+    const supabase = createClient();
 
     // Pega usuário autenticado
     const { data: { user: authUser }, error: authError } = await supabase.auth.getUser();

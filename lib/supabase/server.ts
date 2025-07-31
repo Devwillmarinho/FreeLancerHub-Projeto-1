@@ -1,18 +1,30 @@
-// lib/supabase/server.ts
+import { createServerClient, type CookieOptions } from '@supabase/ssr'
+import { cookies } from 'next/headers'
 
-import { Database } from '@/types/supabase';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
+export function createClient() {
+  const cookieStore = cookies()
 
-const createSupabaseClient = (cookieStore: ReturnType<typeof cookies>) => {
-  return createServerClient<Database>(
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
-      cookies: cookieStore,
+      cookies: {
+        get(name: string) {
+          return cookieStore.get(name)?.value
+        },
+        set(name: string, value: string, options: CookieOptions) {
+          // The `set` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing user sessions.
+          // We'll wrap it in a try/catch block to prevent errors.
+          try { cookieStore.set({ name, value, ...options }) } catch (error) {}
+        },
+        remove(name: string, options: CookieOptions) {
+          // The `remove` method was called from a Server Component.
+          // This can be ignored if you have middleware refreshing user sessions.
+          // We'll wrap it in a try/catch block to prevent errors.
+          try { cookieStore.set({ name, value: '', ...options }) } catch (error) {}
+        },
+      },
     }
-  );
-};
-
-// Exportando a função com o nome createClient para evitar conflito
-export { createSupabaseClient as createClient };
+  )
+}

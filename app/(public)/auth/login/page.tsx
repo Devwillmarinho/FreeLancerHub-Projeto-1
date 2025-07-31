@@ -23,8 +23,8 @@ import {
   Zap,
   ArrowLeft,
   Users,
-} from "lucide-react"
-import { createClientComponentClient } from "@supabase/auth-helpers-nextjs"
+} from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const [formData, setFormData] = useState({
@@ -38,7 +38,8 @@ export default function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false)
   const router = useRouter()
   const searchParams = useSearchParams()
-  const supabase = createClientComponentClient()
+  const supabase = createClient();
+
 
   useEffect(() => {
     const errorParam = searchParams.get("error")
@@ -60,29 +61,23 @@ export default function LoginPage() {
     setError("")
     setSuccess("")
 
-    try {
-      const response = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
+    const { error } = await supabase.auth.signInWithPassword({
+      email: formData.email,
+      password: formData.password,
+    });
 
-      const data = await response.json();
+    setLoading(false);
 
-      if (!response.ok) {
-        throw new Error(data.error || "Falha no login")
-      }
-
+    if (error) {
+      setError(error.message || "Erro de conexão. Tente novamente.");
+    } else {
       setSuccess("Login realizado com sucesso! Redirecionando...")
+      // O setTimeout é mantido para que você veja a mensagem de sucesso.
+      // O router.refresh() é a chave para quebrar o loop.
       setTimeout(() => {
-        router.push("/dashboard")
-      }, 1500)
-    } catch (err: any) {
-      setError(err.message || "Erro de conexão. Tente novamente.")
-    } finally {
-      setLoading(false)
+        router.push("/dashboard");
+        router.refresh();
+      }, 1500);
     }
   }
 

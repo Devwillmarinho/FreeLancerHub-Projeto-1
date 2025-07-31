@@ -1,57 +1,43 @@
-import { createServerComponentClient } from "@supabase/auth-helpers-nextjs";
-import { cookies } from "next/headers";
-import { redirect } from "next/navigation";
-import DashboardClientPage from "./DashboardClientPage";
+import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import DashboardClientPage from './DashboardClientPage'
+import { UserProfile } from '@/types'
 
-// Garante que a página seja sempre renderizada dinamicamente
+// Força a página a ser sempre renderizada dinamicamente, desabilitando o cache.
 export const dynamic = 'force-dynamic';
 
-// Helper para tentar buscar o perfil, lidando com o lag do gatilho do banco de dados
-async function getProfileWithRetry(supabase: any, userId: string, retries = 3, delay = 500) {
-  for (let i = 0; i < retries; i++) {
-    const { data: profile, error } = await supabase
-      .from("profiles")
-      .select("*, user_type")
-      .eq("id", userId)
-      .single();
-    
-    if (profile) return profile;
-
-    // Não tenta novamente em caso de erros reais, apenas se não encontrar o perfil
-    if (error && error.code !== 'PGRST116') throw error;
-
-    if (i < retries - 1) await new Promise(res => setTimeout(res, delay));
-  }
-  return null; // Perfil não encontrado após as tentativas
-}
-
-export default async function Dashboard() {
-  const supabase = createServerComponentClient({ cookies });
+export default async function DashboardPage() {
+  const supabase = createClient()
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+  } = await supabase.auth.getUser()
 
-  if (!session) {
-    // Esta é uma rota protegida, se não houver sessão, volta para o login.
-    redirect("/auth/login");
+  if (!user) {
+    return redirect('/auth/login')
   }
 
-  // Tenta buscar o perfil com algumas tentativas
-  const profile = await getProfileWithRetry(supabase, session.user.id);
+  // Busca o perfil do usuário na sua tabela 'profiles'
+  const { data: profile, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .eq('id', user.id)
+    .single()
 
-  // Se o perfil não for encontrado ou não tiver um tipo, redireciona para a página de completar o perfil.
-  if (!profile || !profile.user_type) {
-    console.log("Perfil incompleto, redirecionando para /auth/complete-profile");
-    redirect('/auth/complete-profile');
+  if (error || !profile) {
+    console.error("Erro ao buscar perfil ou perfil não encontrado:", error);
+    // Se o perfil não for encontrado, redireciona para o login com uma mensagem de erro
+    return redirect('/auth/login?error=profile_not_found')
   }
 
-  // Se o perfil foi encontrado e está completo, renderiza o dashboard.
+  // Monta o objeto de perfil para passar para o componente cliente
+  const userProfile: UserProfile = profile
+
   return (
     <DashboardClientPage
-      userEmail={session.user.email}
-      profile={profile}
-      userType={profile.user_type}
+      userEmail={user.email}
+      profile={userProfile}
+      userType={userProfile.user_type}
     />
-  );
+  )
 }
