@@ -118,9 +118,10 @@ npm start
 - \`POST /api/messages\` - Enviar mensagem
 
 ## Deploy
+https://free-lancer-hub-projeto-1.vercel.app/
 
-a definir
 
 ## Licença
+vercel - supabase
 
-MIT License
+
