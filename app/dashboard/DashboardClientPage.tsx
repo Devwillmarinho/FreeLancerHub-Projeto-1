@@ -1,7 +1,7 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation"; // Corrigido para importação correta
 import { Button } from "@/components/ui/button"; // Corrigido: 'button' em minúsculo
 import {
@@ -239,120 +239,133 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
       fetchReviews();
     }
   }, [showProfileDialog, profile?.id, toast]);
-  // A busca de dados agora é simplificada, pois as políticas de segurança (RLS)
-  // do Supabase já filtram os dados no backend.
-  useEffect(() => {
-    const fetchDashboardData = async () => {
-      if (!profile?.id) {
-        toast({ title: "Sessão expirada", description: "Por favor, faça login novamente.", variant: "destructive" });
-        router.push('/auth/login');
-        return;
+
+  const fetchDashboardData = useCallback(async () => {
+    if (!profile?.id) {
+      toast({ title: "Sessão expirada", description: "Por favor, faça login novamente.", variant: "destructive" });
+      router.push('/auth/login');
+      return;
+    }
+
+    setIsLoadingProjects(true);
+    setIsLoadingProposals(true);
+    setIsLoadingContracts(true);
+    if (userType === 'admin') setIsLoadingUsers(true);
+
+    try {
+      // Pedimos os projetos diretamente ao Supabase.
+      // As regras de RLS que acabamos de criar vai filtrar os resultados no automático.
+      let projectsQuery = supabase
+        .from('projects')
+        .select(`
+          id, title, budget, deadline, status, freelancer_id,
+          company:profiles!company_id(id, full_name, company_name, avatar_url)
+        `)
+        .order('created_at', { ascending: false });
+
+      // Adicionei um filtro explícito para garantir que a empresa veja apenas seus projetos.
+      // Isso funciona como uma camada extra de segurança e clareza, além do RLS no meu ponto de vista.
+      if (userType === 'company') {
+        projectsQuery = projectsQuery.eq('company_id', profile.id);
+      } else if (userType === 'freelancer') {
+        // Freelancers precisam ver tanto os projetos abertos para explorar, quanto os que já foram atribuídos a eles.
+        projectsQuery = projectsQuery.or(`status.eq.open,freelancer_id.eq.${profile.id}`);
       }
 
-      setIsLoadingProjects(true);
-      setIsLoadingProposals(true);
-      setIsLoadingContracts(true);
-      if (userType === 'admin') setIsLoadingUsers(true);
+      const { data: projectsData, error: projectsError } = await projectsQuery;
 
-      try {
-        // Pedimos os projetos diretamente ao Supabase.
-        // As regras de RLS que acabamos de criar vai filtrar os resultados no automático.
-        let projectsQuery = supabase
-          .from('projects')
-          .select(`
-            id, title, budget, deadline, status, freelancer_id,
-            company:profiles!company_id(id, full_name, company_name, avatar_url)
-          `)
-          .order('created_at', { ascending: false });
+      // Busca as propostas através da API, que já tem a lógica de permissão correta.
+      const { data: { session: apiSession } } = await supabase.auth.getSession();
+      if (!apiSession) {
+        throw new Error('Sessão não encontrada para chamada de API.');
+      }
+      const proposalsResponse = await fetch('/api/proposals', {
+        headers: {
+          Authorization: `Bearer ${apiSession.access_token}`,
+        },
+      });
+      if (!proposalsResponse.ok) {
+        throw new Error('Falha ao buscar propostas.');
+      }
 
-        // Adicionei um filtro explícito para garantir que a empresa veja apenas seus projetos.
-        // Isso funciona como uma camada extra de segurança e clareza, além do RLS no meu ponto de vista.
-        if (userType === 'company') {
-          projectsQuery = projectsQuery.eq('company_id', profile.id);
-        }
+      // Busca as avaliações já feitas pelo usuário para não mostrar o botão novamente
+      const { data: reviewsData } = await supabase
+        .from('reviews')
+        .select('contract_id')
+        .eq('reviewer_id', profile.id);
 
-        const { data: projectsData, error: projectsError } = await projectsQuery;
+      if (reviewsData) {
+        setReviewedContractIds(reviewsData.map(r => r.contract_id));
+      }
 
-        // Busca as propostas através da API, que já tem a lógica de permissão correta.
-        const { data: { session: apiSession } } = await supabase.auth.getSession();
-        if (!apiSession) {
-          throw new Error('Sessão não encontrada para chamada de API.');
-        }
-        const proposalsResponse = await fetch('/api/proposals', {
-          headers: {
-            Authorization: `Bearer ${apiSession.access_token}`,
-          },
-        });
-        if (!proposalsResponse.ok) {
-          throw new Error('Falha ao buscar propostas.');
-        }
+      const proposalsPayload = await proposalsResponse.json();
+      const proposalsData = proposalsPayload.data || [];
 
-        // Busca as avaliações já feitas pelo usuário para não mostrar o botão novamente
-        const { data: reviewsData } = await supabase
-          .from('reviews')
-          .select('contract_id')
-          .eq('reviewer_id', profile.id);
+      // A query de contratos agora filtra explicitamente pelo ID do usuário,
+      // garantindo que freelancers e empresas vejam apenas seus próprios contratos.
+      // Isso torna a lógica mais robusta e menos dependente apenas do RLS.
+      let contractsQuery = supabase.from('contracts').select(`*, project:projects(title), company:profiles!company_id(id, company_name), freelancer:profiles!freelancer_id(id, full_name)`);
 
-        if (reviewsData) {
-          setReviewedContractIds(reviewsData.map(r => r.contract_id));
-        }
+      if (userType === 'freelancer') {
+        contractsQuery = contractsQuery.eq('freelancer_id', profile.id);
+      } else if (userType === 'company') {
+        contractsQuery = contractsQuery.eq('company_id', profile.id);
+      }
 
-        const proposalsPayload = await proposalsResponse.json();
-        const proposalsData = proposalsPayload.data || [];
+      const { data: contractsData, error: contractsError } = await contractsQuery;
 
-        const { data: contractsData, error: contractsError } = await supabase.from('contracts').select(`*, project:projects(title), company:profiles!company_id(id, company_name), freelancer:profiles!freelancer_id(id, full_name)`);
+      if (projectsError || contractsError) {
+        throw projectsError || contractsError;
+      }
 
-        if (projectsError || contractsError) {
-          throw projectsError || contractsError;
-        }
+      setProjects(projectsData || []);
+      setProposals(proposalsData);
+      setContracts(contractsData || []);
 
-        setProjects(projectsData || []);
-        setProposals(proposalsData);
-        setContracts(contractsData || []);
+      // Adiciona uma verificação para garantir que cada projeto no array é um objeto válido,
+      // filtrando qualquer item que seja `null` ou `undefined`.
+      const validProjects = (projectsData || []).filter(p => p);
 
-        // Adiciona uma verificação para garantir que cada projeto no array é um objeto válido,
-        // filtrando qualquer item que seja `null` ou `undefined`.
-        const validProjects = (projectsData || []).filter(p => p);
+      if (userType === 'freelancer') {
+        // Para freelancers, separamos os projetos abertos dos que já são dele.
+        setMyGigs(validProjects.filter(p => p.freelancer_id === profile.id));
+        setBrowseProjects(validProjects.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
+      } else {
+        // Para empresas, a RLS já filtrou. Todos os projetos recebidos são dela.
+        setMyGigs(validProjects);
+        setBrowseProjects([]); // Empresas não exploram projetos
+      }
 
-        if (userType === 'freelancer') {
-          // Para freelancers, separamos os projetos abertos dos que já são dele.
-          setMyGigs(validProjects.filter(p => p.freelancer_id === profile.id));
-          setBrowseProjects(validProjects.filter(p => p.status === 'open' && p.freelancer_id !== profile.id));
-        } else {
-          // Para empresas, a RLS já filtrou. Todos os projetos recebidos são dela.
-          setMyGigs(validProjects);
-          setBrowseProjects([]); // Empresas não exploram projetos
-        }
-
-        // Se for admin, busca todos os usuários
-        if (userType === 'admin') {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
-            const usersResponse = await fetch('/api/users', {
-              headers: {
-                Authorization: `Bearer ${session.access_token}`,
-              }
-            });
-            if (!usersResponse.ok) {
-              throw new Error('Falha ao buscar usuários');
+      // Se for admin, busca todos os usuários
+      if (userType === 'admin') {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          const usersResponse = await fetch('/api/users', {
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
             }
-            const usersData = await usersResponse.json();
-            setAllUsers(usersData.data || []);
+          });
+          if (!usersResponse.ok) {
+            throw new Error('Falha ao buscar usuários');
           }
+          const usersData = await usersResponse.json();
+          setAllUsers(usersData.data || []);
         }
-      } catch (error) {
-        console.error("Falha ao buscar dados do dashboard:", error);
-        toast({ title: "Erro", description: "Não foi possível carregar os dados do dashboard.", variant: "destructive" });
-      } finally {
-        setIsLoadingProjects(false);
-        setIsLoadingProposals(false);
-        setIsLoadingContracts(false);
-        if (userType === 'admin') setIsLoadingUsers(false);
       }
-    };
+    } catch (error) {
+      console.error("Falha ao buscar dados do dashboard:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar os dados do dashboard.", variant: "destructive" });
+    } finally {
+      setIsLoadingProjects(false);
+      setIsLoadingProposals(false);
+      setIsLoadingContracts(false);
+      if (userType === 'admin') setIsLoadingUsers(false);
+    }
+  }, [profile?.id, userType, supabase, toast, router]);
 
+  useEffect(() => {
     fetchDashboardData();
-  }, [userType, profile?.id, toast, router, supabase]);
+  }, [fetchDashboardData]);
 
   const handleCreateProject = async () => {
     // Pega a sessão mais recente do lado do cliente para garantir um token válido.
@@ -474,7 +487,17 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
 
       const result = await response.json();
       if (!response.ok) {
-        throw new Error(result.error || 'Falha ao enviar avaliação.');
+        // Melhora a extração da mensagem de erro da API
+        let errorMessage = 'Falha ao enviar avaliação.';
+        if (result.error) {
+          errorMessage = result.error;
+        } else if (result.issues && Array.isArray(result.issues)) {
+          // Lida com erros de validação do Zod, que vêm como um array 'issues'
+          errorMessage = result.issues.map((issue: any) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+        } else if (result.message) {
+          errorMessage = result.message;
+        }
+        throw new Error(errorMessage);
       }
 
       toast({ title: "Sucesso!", description: "Sua avaliação foi enviada." });
@@ -612,21 +635,13 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         throw new Error(result.error || 'Falha ao atualizar a proposta.');
       }
 
-      // Atualiza a lista de propostas na interface
-      setProposals(prev => prev.map(p => p.id === proposalId ? { ...p, status } : p));
-
-      // Se aceita, atualiza o status do projeto correspondente
-      if (status === 'accepted') {
-        const acceptedProposal = proposals.find(p => p.id === proposalId);
-        if (acceptedProposal) {
-          // Esta parte é uma melhoria de UX, mas o ideal seria recarregar os projetos
-          // ou receber o projeto atualizado da API. Por simplicidade, vamos recarregar.
-          router.refresh(); 
-        }
-      }
-
       toast({ title: "Sucesso!", description: result.message });
+
+      // Após aceitar a proposta, buscamos todos os dados novamente para garantir
+      // que o novo contrato e os status atualizados apareçam na interface.
+      await fetchDashboardData();
     } catch (error: any) {
+      console.error("DETALHES DO ERRO AO ATUALIZAR PROPOSTA:", error);
       toast({ title: "Erro", description: error.message, variant: 'destructive' });
     } finally {
       setUpdatingProposalId(null);
@@ -656,11 +671,14 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
         throw new Error(result.error || 'Falha ao finalizar o contrato.');
       }
 
+      const updatedContract = result.data;
+
       // Atualiza o contrato no estado local para refletir a mudança imediatamente
-      setContracts(prev => prev.map(c => c.id === contractId ? { ...c, is_completed: true } : c));
+      setContracts(prev => prev.map(c => c.id === contractId ? { ...c, ...updatedContract } : c));
       // Atualiza também o status do projeto na lista de 'myGigs'
-      const completedContract = contracts.find(c => c.id === contractId);
-      if (completedContract) setMyGigs(prev => prev.map(p => p.id === completedContract.project_id ? { ...p, status: 'completed' } : p));
+      if (updatedContract.is_completed) {
+        setMyGigs(prev => prev.map(p => p.id === updatedContract.project_id ? { ...p, status: 'completed' } : p));
+      }
       toast({ title: "Sucesso!", description: "Contrato marcado como concluído." });
 
     } catch (error: any) {
@@ -1094,22 +1112,24 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                               <div className="flex items-center text-muted-foreground"><Calendar className="h-4 w-4 mr-2" /><span>Prazo: {project.deadline ? new Date(project.deadline).toLocaleDateString('pt-BR') : 'Não definido'}</span></div>
                             </CardContent>
                           </div>
-                          <CardFooter className="flex justify-between items-center p-4 bg-muted/50">
-                            <Badge
-                              variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
-                              className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
-                            >
-                              {project.status.replace('_', ' ')}
-                            </Badge>
+                          <CardFooter className="flex justify-between items-center p-4 bg-muted/50 ">
+                            <div className="flex items-center space-x-2">
+                              <Badge
+                                variant={project.status === 'open' || project.status === 'in_progress' || project.status === 'completed' ? 'default' : getStatusVariant(project.status)}
+                                className={`capitalize ${project.status === 'open' ? 'bg-green-600 hover:bg-green-700 text-white border-transparent' : ''} ${project.status === 'in_progress' ? 'bg-yellow-500 hover:bg-yellow-600 text-white border-transparent' : ''} ${project.status === 'completed' ? 'bg-slate-500 hover:bg-slate-600 text-white border-transparent' : ''}`}
+                              >
+                                {project.status.replace('_', ' ')}
+                              </Badge>
+                              {userType === 'freelancer' && project.status === 'in_progress' && contract && !contract.is_completed && (
+                                <Button variant="default" size="sm" onClick={(e) => { e.preventDefault(); handleCompleteContract(contract.id); }} disabled={updatingContractId === contract.id}>
+                                  {updatingContractId === contract.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Concluir
+                                </Button>
+                              )}
+                            </div>
                             <div className="flex items-center space-x-2">
                               {userType === 'company' && (
                                 <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500 hover:bg-red-100" onClick={(e) => { e.preventDefault(); setProjectToDelete(project); }} disabled={deletingProjectId === project.id}>
                                   {deletingProjectId === project.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash className="h-4 w-4" />}
-                                </Button>
-                              )}
-                              {userType === 'freelancer' && project.status === 'in_progress' && contract && !contract.is_completed && (
-                                <Button variant="default" size="sm" onClick={(e) => { e.preventDefault(); handleCompleteContract(contract.id); }} disabled={updatingContractId === contract.id}>
-                                  {updatingContractId === contract.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />} Concluir
                                 </Button>
                               )}
                               {contract?.is_completed && !reviewedContractIds.includes(contract.id) && (
@@ -1262,30 +1282,32 @@ export default function DashboardClientPage({ userEmail, profile, userType }: Da
                 ) : contracts.length > 0 ? (
                   <div className="space-y-4">
                     {contracts.map((contract) => (
-                      <Card key={contract.id}>
-                        <CardContent className="p-4 flex items-center justify-between">
-                          <div className="space-y-1">
-                            <p className="font-semibold text-primary">{contract.project.title}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {userType === 'company' ? `Freelancer: ${contract.freelancer.full_name}` : `Empresa: ${contract.company.company_name}`}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              Valor: R$ {contract.budget.toLocaleString('pt-BR')}
-                            </p>
-                          </div>
-                          <div className="flex items-center space-x-2">
-                            <Badge variant={contract.is_completed ? 'default' : 'secondary'} className={contract.is_completed ? 'bg-green-600' : ''}>
-                              {contract.is_completed ? 'Concluído' : 'Em Andamento'}
-                            </Badge>
-                            {contract.is_completed && !reviewedContractIds.includes(contract.id) && (
-                              <Button variant="outline" size="sm" onClick={() => setReviewingContract(contract)}>
-                                <Star className="mr-2 h-4 w-4" />
-                                Avaliar
-                              </Button>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
+                      <Link href={`/contracts/${contract.id}`} key={contract.id} className="block">
+                        <Card className="hover:shadow-md transition-shadow">
+                          <CardContent className="p-4 flex items-center justify-between">
+                            <div className="space-y-1">
+                              <p className="font-semibold text-primary">{contract.project.title}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {userType === 'company' ? `Freelancer: ${contract.freelancer.full_name}` : `Empresa: ${contract.company.company_name}`}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                Valor: R$ {contract.budget.toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <Badge variant={contract.is_completed ? 'default' : 'secondary'} className={contract.is_completed ? 'bg-green-600' : ''}>
+                                {contract.is_completed ? 'Concluído' : 'Em Andamento'}
+                              </Badge>
+                              {contract.is_completed && !reviewedContractIds.includes(contract.id) && (
+                                <Button variant="outline" size="sm" onClick={(e) => { e.preventDefault(); setReviewingContract(contract); }}>
+                                  <Star className="mr-2 h-4 w-4" />
+                                  Avaliar
+                                </Button>
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </Link>
                     ))}
                   </div>
                 ) : (

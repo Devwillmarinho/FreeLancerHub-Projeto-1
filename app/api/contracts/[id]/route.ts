@@ -1,31 +1,35 @@
 import { NextResponse } from "next/server"
 import { z } from "zod"
 import { supabaseAdmin } from "@/lib/supabase"
-import { authMiddleware } from "@/middleware/auth"
+import { requireUserType } from "@/middleware/auth"
 import { NextRequestWithUser } from "@/types"
 
 const updateContractSchema = z.object({
-  is_completed: z.boolean(),
+  is_completed: z.boolean().optional(),
 })
 
 export async function PUT(request: NextRequestWithUser, { params }: { params: { id: string } }) {
-  const authResult = await authMiddleware(request)
+  // Apenas freelancers podem marcar um contrato como concluído neste fluxo.
+  const authResult = await requireUserType(["freelancer"])(request)
   if (authResult) return authResult
 
-  try {
-    const user = request.user
-    const contractId = params.id
-    const body = await request.json()
+  const contractId = params.id
+  const user = request.user
 
+  try {
+    const body = await request.json()
     const validation = updateContractSchema.safeParse(body)
-    if (!validation.success || !validation.data.is_completed) {
-      return NextResponse.json({ error: "Apenas é permitido marcar um contrato como concluído." }, { status: 400 })
+
+    if (!validation.success) {
+      return NextResponse.json({ error: "Dados inválidos.", issues: validation.error.flatten().fieldErrors }, { status: 400 })
     }
 
-    // 1. Verificar se o contrato existe
+    const { is_completed } = validation.data
+
+    // 1. Verifica se o contrato existe e se o usuário é o freelancer associado a ele.
     const { data: contract, error: contractError } = await supabaseAdmin
       .from("contracts")
-      .select("company_id, freelancer_id")
+      .select("id, project_id, freelancer_id")
       .eq("id", contractId)
       .single()
 
@@ -33,37 +37,36 @@ export async function PUT(request: NextRequestWithUser, { params }: { params: { 
       return NextResponse.json({ error: "Contrato não encontrado." }, { status: 404 })
     }
 
-    // 2. Apenas o freelancer do projeto pode marcá-lo como concluído.
-    if (user.user_type !== "freelancer" || user.id !== contract.freelancer_id) {
-      return NextResponse.json({ error: "Apenas o freelancer do projeto pode marcá-lo como concluído." }, { status: 403 })
+    if (contract.freelancer_id !== user.id) {
+      return NextResponse.json({ error: "Ação não permitida. Você não é o freelancer deste contrato." }, { status: 403 })
     }
 
-    // 3. Atualizar o contrato
-    const { data: updatedContract, error: updateError } = await supabaseAdmin
+    // 2. Atualiza o status do contrato.
+    const { data: updatedContract, error: updateContractError } = await supabaseAdmin
       .from("contracts")
-      .update({ is_completed: true })
+      .update({ is_completed })
       .eq("id", contractId)
       .select()
       .single()
 
-    if (updateError) throw updateError
+    if (updateContractError) throw updateContractError
 
-    // 4. Atualizar o status do projeto para 'completed'
-    if (contract.project_id) {
-      const { error: projectUpdateError } = await supabaseAdmin
+    // 3. Se o contrato foi concluído, atualiza também o status do projeto.
+    if (is_completed) {
+      const { error: updateProjectError } = await supabaseAdmin
         .from("projects")
         .update({ status: "completed" })
         .eq("id", contract.project_id)
 
-      if (projectUpdateError) {
-        // Loga o erro mas não falha a requisição, pois a ação principal (completar o contrato) foi bem-sucedida.
-        console.error(`Falha ao atualizar o status do projeto para o contrato ${contractId}:`, projectUpdateError)
+      if (updateProjectError) {
+        // Em um cenário real, usar uma transaction seria ideal aqui.
+        console.error(`Falha ao atualizar o status do projeto ${contract.project_id} para 'completed':`, updateProjectError)
       }
     }
 
     return NextResponse.json({ data: updatedContract, message: "Contrato atualizado com sucesso." })
   } catch (error: any) {
-    console.error("Contract update error:", error)
+    console.error(`Erro ao atualizar contrato ${contractId}:`, error)
     return NextResponse.json({ error: error.message || "Erro interno do servidor." }, { status: 500 })
   }
 }
