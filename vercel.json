@@ -1,13 +1,6 @@
 {
-  "functions": {
-    "app/api/**/*.ts": {
-      "maxDuration": 30
-    }
-  },
-  "env": {
-    "NEXT_PUBLIC_SUPABASE_URL": "https://hoaevvssikvaioautzde.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvYWV2dnNzaWt2YWlvYXV0emRlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2MDk4MjEsImV4cCI6MjA2ODE4NTgyMX0.WtXvbKOx6bafcuDx_E66duLXk4KTCKuH_5aPExep1Ss",
-    "SUPABASE_SERVICE_ROLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhvYWV2dnNzaWt2YWlvYXV0emRlIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc1MjYwOTgyMSwiZXhwIjoyMDY4MTg1ODIxfQ.o0bu46pn5rbsmUXAg_XTx70ZjWWZ1-9mG9KdmV32UCY",
-    "NEXT_PUBLIC_WHATSAPP_NUMBER": "5511999999999"
-  }
+  "version": 2,
+  "builds": [
+    { "src": "package.json", "use": "@vercel/next" }
+  ]
 }
